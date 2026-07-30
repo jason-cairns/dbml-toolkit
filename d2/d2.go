@@ -4,6 +4,7 @@
 package d2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -58,12 +59,24 @@ func (Engine) Render(s *model.Schema, opt diagram.Options, f diagram.Format) ([]
 	}
 	switch f {
 	case diagram.SVG:
-		return d2svg.Render(dg, &d2svg.RenderOpts{})
+		svg, err := d2svg.Render(dg, &d2svg.RenderOpts{})
+		if err != nil {
+			return nil, err
+		}
+		return directional(svg), nil
 	case diagram.ASCII:
 		return d2ascii.NewASCIIartist().Render(ctx, dg, &d2ascii.RenderOpts{})
 	default:
 		return nil, fmt.Errorf("d2: unsupported format %q", f)
 	}
+}
+
+// directional makes animated relationships flow one way (source -> target,
+// i.e. FK -> PK). D2 treats an edge with arrowheads on both ends as
+// bidirectional and splits its animation to flow outward from the midpoint,
+// reversing one half; dropping that reversal makes both halves flow src -> dst.
+func directional(svg []byte) []byte {
+	return bytes.ReplaceAll(svg, []byte("animation-direction: reverse;"), nil)
 }
 
 // quiet silences D2's debug logging (it otherwise writes stack traces to stderr).
@@ -193,18 +206,16 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 	// the i-th created edge (edges keep creation order).
 	var specs []edgeSpec
 	for _, r := range s.Refs {
-		from := endpointKey(ids, r.From)
-		to := endpointKey(ids, r.To)
-		if from == "" || to == "" {
+		sp, src, dst := orient(ids, r)
+		if src == "" || dst == "" {
 			continue
 		}
 		before := len(b.g.Edges)
-		b.create(from + " -> " + to)
+		b.create(src + " -> " + dst)
 		if b.err != nil || len(b.g.Edges) == before {
 			continue
 		}
-		fromMany, toMany := cardinality(r.Op)
-		specs = append(specs, edgeSpec{fromMany, toMany, optional(r.From), optional(r.To)})
+		specs = append(specs, sp)
 	}
 
 	for i, n := range s.Notes {
@@ -226,18 +237,32 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 		}
 		e := b.g.Edges[i]
 		if opt.Notation == diagram.Label {
-			e.SrcArrowhead = arrowLabel(card(sp.fromMany, sp.fromOpt))
-			e.DstArrowhead = arrowLabel(card(sp.toMany, sp.toOpt))
+			e.SrcArrowhead = arrowLabel(card(sp.srcMany, sp.srcOpt))
+			e.DstArrowhead = arrowLabel(card(sp.dstMany, sp.dstOpt))
 		} else {
 			e.SrcArrow = true
-			e.SrcArrowhead = arrowShape(crowfoot(sp.fromMany, sp.fromOpt))
-			e.DstArrowhead = arrowShape(crowfoot(sp.toMany, sp.toOpt))
+			e.SrcArrowhead = arrowShape(crowfoot(sp.srcMany, sp.srcOpt))
+			e.DstArrowhead = arrowShape(crowfoot(sp.dstMany, sp.dstOpt))
 		}
 		if !opt.NoAnimate {
 			e.Style.Animated = &d2graph.Scalar{Value: "true"}
 		}
 	}
 	return b.g, nil
+}
+
+// orient returns the edge endpoints and cardinality with the source fixed to
+// the many/foreign-key side when the operator gives a direction, so the edge
+// (and its animation) flows reference -> referent (FK -> PK).
+func orient(ids map[*model.Table]string, r *model.Ref) (sp edgeSpec, src, dst string) {
+	from := endpointKey(ids, r.From)
+	to := endpointKey(ids, r.To)
+	fromMany, toMany := cardinality(r.Op)
+	fromOpt, toOpt := optional(r.From), optional(r.To)
+	if r.Op == "<" { // From is the one side, To is the many side — swap
+		return edgeSpec{toMany, fromMany, toOpt, fromOpt}, to, from
+	}
+	return edgeSpec{fromMany, toMany, fromOpt, toOpt}, from, to
 }
 
 // settingColor returns a TableGroup's color setting, if any.
@@ -258,7 +283,7 @@ func qual(schema, name string) string {
 	return schema + "." + name
 }
 
-type edgeSpec struct{ fromMany, toMany, fromOpt, toOpt bool }
+type edgeSpec struct{ srcMany, dstMany, srcOpt, dstOpt bool }
 
 func arrowShape(shape string) *d2graph.Attributes {
 	a := &d2graph.Attributes{}
