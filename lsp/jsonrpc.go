@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -35,34 +36,41 @@ func newConn(r io.Reader, w io.Writer) *conn {
 	return &conn{r: bufio.NewReader(r), w: w}
 }
 
-// read parses one Content-Length-framed message.
+// read parses the next Content-Length-framed message. A frame that fails to
+// JSON-decode is skipped (logged, not returned): its bytes were fully consumed
+// so the stream stays aligned, and dropping one bad message is far better than
+// tearing down the server and stranding the editor's diagnostics. Only I/O
+// errors (including EOF) and malformed framing are fatal.
 func (c *conn) read() (*message, error) {
-	length := -1
 	for {
-		line, err := c.r.ReadString('\n')
-		if err != nil {
+		length := -1
+		for {
+			line, err := c.r.ReadString('\n')
+			if err != nil {
+				return nil, err
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				break
+			}
+			if k, v, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "content-length") {
+				length, _ = strconv.Atoi(strings.TrimSpace(v))
+			}
+		}
+		if length < 0 {
+			return nil, fmt.Errorf("missing Content-Length header")
+		}
+		body := make([]byte, length)
+		if _, err := io.ReadFull(c.r, body); err != nil {
 			return nil, err
 		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
+		var m message
+		if err := json.Unmarshal(body, &m); err != nil {
+			fmt.Fprintf(os.Stderr, "lsp: skipping unparseable message: %v\n", err)
+			continue
 		}
-		if k, v, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "content-length") {
-			length, _ = strconv.Atoi(strings.TrimSpace(v))
-		}
+		return &m, nil
 	}
-	if length < 0 {
-		return nil, fmt.Errorf("missing Content-Length header")
-	}
-	body := make([]byte, length)
-	if _, err := io.ReadFull(c.r, body); err != nil {
-		return nil, err
-	}
-	var m message
-	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, err
-	}
-	return &m, nil
 }
 
 // reply sends a response to a request id. A nil result is encoded as an

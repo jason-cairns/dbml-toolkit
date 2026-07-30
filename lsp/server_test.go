@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -58,6 +59,28 @@ func TestCrossFileNavigation(t *testing.T) {
 	if def.Range.Start.Line != 0 {
 		t.Fatalf("users defined on line 0 of base.dbml, got %d", def.Range.Start.Line)
 	}
+}
+
+// A single unparseable frame must not kill the connection: its bytes are fully
+// consumed so the stream stays aligned, and read must return the next valid
+// message. Dying here would strand the editor's diagnostics.
+func TestReadSkipsUnparseableFrame(t *testing.T) {
+	frame := func(body string) string {
+		return "Content-Length: " + itoa(len(body)) + "\r\n\r\n" + body
+	}
+	stream := frame("{ not json ]") + frame(`{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+	c := newConn(strings.NewReader(stream), &bytes.Buffer{})
+	m, err := c.read()
+	if err != nil {
+		t.Fatalf("read returned error instead of skipping bad frame: %v", err)
+	}
+	if m.Method != "initialized" {
+		t.Fatalf("expected to recover the initialized message, got %q", m.Method)
+	}
+}
+
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }
 
 func readFile(t *testing.T, p string) string {
