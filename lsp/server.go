@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jasoncairns/dbml-parser/ast"
-	"github.com/jasoncairns/dbml-parser/model"
-	"github.com/jasoncairns/dbml-parser/resolver"
+	"github.com/jason-cairns/dbml-toolkit/ast"
+	"github.com/jason-cairns/dbml-toolkit/model"
+	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
 // --- LSP wire types (minimal subset) ---------------------------------------

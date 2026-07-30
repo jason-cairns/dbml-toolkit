@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jasoncairns/dbml-parser/resolver"
+	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
 func loadExample(t *testing.T) string {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jasoncairns/dbml-parser/ast"
+	"github.com/jason-cairns/dbml-toolkit/ast"
 )
 
 const corpus = `

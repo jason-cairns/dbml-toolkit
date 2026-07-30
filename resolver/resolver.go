@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jasoncairns/dbml-parser/ast"
-	"github.com/jasoncairns/dbml-parser/model"
-	"github.com/jasoncairns/dbml-parser/parser"
+	"github.com/jason-cairns/dbml-toolkit/ast"
+	"github.com/jason-cairns/dbml-toolkit/model"
+	"github.com/jason-cairns/dbml-toolkit/parser"
 )
 
 // Load reads the entry file from disk and resolves the whole module graph.

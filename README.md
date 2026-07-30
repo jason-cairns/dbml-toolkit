@@ -4,10 +4,10 @@ A small, self-contained [DBML](https://dbml.dbdiagram.io) toolkit in Go: parse t
 
 ## Install
 
-Download a binary from [Releases](https://github.com/jasoncairns/dbml-parser/releases), or:
+Download a binary from [Releases](https://github.com/jason-cairns/dbml-toolkit/releases), or:
 
 ```bash
-go install github.com/jasoncairns/dbml-parser/cmd/dbml@latest
+go install github.com/jason-cairns/dbml-toolkit/cmd/dbml@latest
 ```
 
 ## Usage

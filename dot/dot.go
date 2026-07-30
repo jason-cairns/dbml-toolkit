@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jasoncairns/dbml-parser/model"
+	"github.com/jason-cairns/dbml-toolkit/model"
 )
 
 // Detail controls how much of each table is drawn.

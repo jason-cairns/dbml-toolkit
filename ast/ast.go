@@ -2,7 +2,7 @@
 // source position of its defining name so the LSP can offer go-to-definition.
 package ast
 
-import "github.com/jasoncairns/dbml-parser/token"
+import "github.com/jason-cairns/dbml-toolkit/token"
 
 // File is a single parsed .dbml source file.
 type File struct {

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/jasoncairns/dbml-parser/dot"
-	"github.com/jasoncairns/dbml-parser/render"
-	"github.com/jasoncairns/dbml-parser/resolver"
+	"github.com/jason-cairns/dbml-toolkit/dot"
+	"github.com/jason-cairns/dbml-toolkit/render"
+	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
 type server struct {

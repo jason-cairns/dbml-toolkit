@@ -1,6 +1,6 @@
 package model
 
-import "github.com/jasoncairns/dbml-parser/ast"
+import "github.com/jason-cairns/dbml-toolkit/ast"
 
 // Build assembles a resolved Schema from parsed files. aliases maps an
 // import alias to the qualified name it targets (for cross-file references).

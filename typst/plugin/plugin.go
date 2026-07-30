@@ -13,10 +13,10 @@ package main
 import (
 	"unsafe"
 
-	"github.com/jasoncairns/dbml-parser/ast"
-	"github.com/jasoncairns/dbml-parser/dot"
-	"github.com/jasoncairns/dbml-parser/model"
-	"github.com/jasoncairns/dbml-parser/parser"
+	"github.com/jason-cairns/dbml-toolkit/ast"
+	"github.com/jason-cairns/dbml-toolkit/dot"
+	"github.com/jason-cairns/dbml-toolkit/model"
+	"github.com/jason-cairns/dbml-toolkit/parser"
 )
 
 //go:wasmimport typst_env wasm_minimal_protocol_write_args_to_buffer

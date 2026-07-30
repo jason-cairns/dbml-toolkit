@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jasoncairns/dbml-parser/ast"
-	"github.com/jasoncairns/dbml-parser/lexer"
-	"github.com/jasoncairns/dbml-parser/token"
+	"github.com/jason-cairns/dbml-toolkit/ast"
+	"github.com/jason-cairns/dbml-toolkit/lexer"
+	"github.com/jason-cairns/dbml-toolkit/token"
 )
 
 // Diagnostic is a parse error with a source range.

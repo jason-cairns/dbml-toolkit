@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jasoncairns/dbml-parser/token"
+	"github.com/jason-cairns/dbml-toolkit/token"
 )
 
 // Lexer scans DBML source. Construct with New and pull tokens with Next.

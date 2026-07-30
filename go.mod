@@ -1,4 +1,4 @@
-module github.com/jasoncairns/dbml-parser
+module github.com/jason-cairns/dbml-toolkit
 
 go 1.26.3
 

@@ -6,8 +6,8 @@ package model
 import (
 	"strings"
 
-	"github.com/jasoncairns/dbml-parser/ast"
-	"github.com/jasoncairns/dbml-parser/token"
+	"github.com/jason-cairns/dbml-toolkit/ast"
+	"github.com/jason-cairns/dbml-toolkit/token"
 )
 
 // Diagnostic is a problem reported during parsing or resolution.

@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jasoncairns/dbml-parser/dot"
-	"github.com/jasoncairns/dbml-parser/lsp"
-	"github.com/jasoncairns/dbml-parser/model"
-	"github.com/jasoncairns/dbml-parser/preview"
-	"github.com/jasoncairns/dbml-parser/render"
-	"github.com/jasoncairns/dbml-parser/resolver"
+	"github.com/jason-cairns/dbml-toolkit/dot"
+	"github.com/jason-cairns/dbml-toolkit/lsp"
+	"github.com/jason-cairns/dbml-toolkit/model"
+	"github.com/jason-cairns/dbml-toolkit/preview"
+	"github.com/jason-cairns/dbml-toolkit/render"
+	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
 const usage = `dbml — a DBML toolkit

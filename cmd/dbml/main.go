@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/jasoncairns/dbml-parser/cli"
+	"github.com/jason-cairns/dbml-toolkit/cli"
 )
 
 // version is set at release time via -ldflags "-X main.version=...".
