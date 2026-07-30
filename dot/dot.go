@@ -77,7 +77,10 @@ func (bd *builder) emit(s *model.Schema) string {
 	p := bd.printf
 	p("digraph dbml {\n")
 	p("  rankdir=LR;\n")
-	p("  graph [splines=ortho, nodesep=0.6, ranksep=1.0, bgcolor=\"white\"];\n")
+	// splines=polyline (not ortho): orthogonal routing ignores HTML-table ports
+	// when nodes sit inside a cluster (TableGroup), collapsing every edge to the
+	// table centre. polyline honours the ports, so edges line up with columns.
+	p("  graph [splines=polyline, nodesep=0.6, ranksep=1.1, bgcolor=\"transparent\"];\n")
 	p("  node [shape=plain, fontname=\"Helvetica\", fontsize=11, fontcolor=\"#0f172a\"];\n")
 	p("  edge [fontname=\"Helvetica\", fontsize=10, color=\"#5b6b7b\"];\n\n")
 
@@ -182,6 +185,11 @@ func (bd *builder) edge(r *model.Ref) {
 	if !ok1 || !ok2 {
 		return
 	}
+	// Compass points force attachment to the table's side at the column's row:
+	// with rankdir=LR the tail ranks left of the head, so the tail exits east
+	// and the head enters west.
+	from += ":e"
+	to += ":w"
 	fromMany, toMany := cardinality(r.Op)
 	fromOpt := endpointOptional(r.From)
 	toOpt := endpointOptional(r.To)

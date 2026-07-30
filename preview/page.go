@@ -6,13 +6,13 @@ const indexHTML = `<!doctype html>
 <meta charset="utf-8">
 <title>dbml preview</title>
 <style>
-  html,body { margin:0; height:100%; background:#0b1020; color:#e2e8f0;
+  html,body { margin:0; height:100%; background:#f8fafc; color:#0f172a;
     font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif; }
   #bar { display:none; position:fixed; top:0; left:0; right:0; padding:10px 14px;
-    background:#7f1d1d; color:#fff; white-space:pre-wrap; font-family:ui-monospace,monospace;
-    font-size:13px; z-index:10; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+    background:#fee2e2; color:#991b1b; white-space:pre-wrap; font-family:ui-monospace,monospace;
+    font-size:13px; z-index:10; box-shadow:0 2px 8px rgba(0,0,0,.15); }
   #view { height:100%; overflow:auto; display:flex; align-items:center; justify-content:center; padding:24px; box-sizing:border-box; }
-  #view svg { max-width:98%; height:auto; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.45); }
+  #view svg { max-width:98%; height:auto; }
 </style>
 </head>
 <body>
