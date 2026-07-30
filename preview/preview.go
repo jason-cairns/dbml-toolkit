@@ -1,6 +1,8 @@
 // Package preview serves a live, auto-refreshing browser preview of a .dbml
-// file. It watches the file and its imports, re-renders on save, keeps the last
-// good diagram on error, and streams reloads to the browser over SSE.
+// file. It keeps the last good diagram on error and streams reloads to the
+// browser over SSE. It renders from an optional in-memory overlay, so the LSP
+// can drive a live preview straight from the editor buffer (before save); the
+// standalone `dbml preview` command renders from disk and watches for changes.
 package preview
 
 import (
@@ -18,71 +20,100 @@ import (
 	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
-type server struct {
-	entry string
-	opt   dot.Options
+// Server is a live-preview HTTP server. Create with New, bind with Listen, and
+// push new content with Render.
+type Server struct {
+	opt dot.Options
 
 	mu      sync.RWMutex
 	svg     []byte
 	errMsg  string
+	title   string
 	clients map[chan struct{}]struct{}
+
+	addr string
+	once sync.Once
 }
 
-// Serve renders entry, opens a browser (unless open is false) and blocks,
-// re-rendering whenever the file or an imported file changes.
-func Serve(entry string, port int, open bool, opt dot.Options) error {
-	s := &server{entry: entry, opt: opt, clients: map[chan struct{}]struct{}{}}
-	s.rerender()
-
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return err
-	}
-	go s.watch()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/svg", s.handleSVG)
-	mux.HandleFunc("/status", s.handleStatus)
-	mux.HandleFunc("/events", s.handleEvents)
-
-	addr := "http://" + ln.Addr().String()
-	fmt.Println("dbml preview:", addr)
-	if open {
-		openBrowser(addr)
-	}
-	return http.Serve(ln, mux)
+// New creates a preview server with the given render options.
+func New(opt dot.Options) *Server {
+	return &Server{opt: opt, clients: map[chan struct{}]struct{}{}}
 }
 
-// rerender rebuilds the SVG, preserving the previous diagram on failure.
-func (s *server) rerender() {
-	schema, diags, err := resolver.Load(s.entry)
+// Listen binds a port (0 picks a free one), serves in the background and, if
+// open is true, opens a browser at the address. It is idempotent: repeated
+// calls return the same address and never rebind or reopen the browser.
+func (s *Server) Listen(port int, open bool) (string, error) {
+	var err error
+	s.once.Do(func() {
+		var ln net.Listener
+		ln, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			return
+		}
+		s.addr = "http://" + ln.Addr().String()
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", s.handleIndex)
+		mux.HandleFunc("/svg", s.handleSVG)
+		mux.HandleFunc("/status", s.handleStatus)
+		mux.HandleFunc("/events", s.handleEvents)
+		go http.Serve(ln, mux)
+		if open {
+			openBrowser(s.addr)
+		}
+	})
+	return s.addr, err
+}
+
+// Addr returns the server address (empty until Listen succeeds).
+func (s *Server) Addr() string { return s.addr }
+
+// Render rebuilds the diagram for entry (resolving imports through overlay when
+// non-nil) and notifies connected browsers. The previous diagram is preserved
+// on error so the view never goes blank.
+func (s *Server) Render(entry string, overlay map[string]string) {
+	schema, diags, err := resolver.LoadSource(entry, overlay)
 	msg := ""
 	for _, d := range diags {
 		msg += d.Pos.String() + ": " + d.Msg + "\n"
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err != nil {
 		s.errMsg = err.Error()
-		return
-	}
-	svg, rerr := render.SVG(dot.Emit(schema, s.opt))
-	if rerr != nil {
+	} else if svg, rerr := render.SVG(dot.Emit(schema, s.opt)); rerr != nil {
 		s.errMsg = rerr.Error() + "\n" + msg
-		return
+	} else {
+		s.svg = svg
+		s.errMsg = msg
 	}
-	s.svg = svg
-	s.errMsg = msg
+	s.title = entry
+	s.mu.Unlock()
+	s.broadcast()
 }
 
-func (s *server) watch() {
+// Serve is the standalone `dbml preview` entry point: it renders entry from
+// disk, opens a browser, then blocks, re-rendering whenever the file or one of
+// its imports changes on disk.
+func Serve(entry string, port int, open bool, opt dot.Options) error {
+	s := New(opt)
+	addr, err := s.Listen(port, open)
+	if err != nil {
+		return err
+	}
+	s.Render(entry, nil)
+	fmt.Println("dbml preview:", addr)
+	s.watch(entry) // blocks
+	return nil
+}
+
+// watch re-renders on filesystem changes to entry and its imports.
+func (s *Server) watch(entry string) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return
 	}
 	defer w.Close()
-	s.addWatches(w)
+	s.addWatches(w, entry)
 
 	var debounce <-chan time.Time
 	for {
@@ -93,9 +124,8 @@ func (s *server) watch() {
 			}
 			debounce = time.After(60 * time.Millisecond)
 		case <-debounce:
-			s.rerender()
-			s.addWatches(w) // imports may have changed
-			s.broadcast()
+			s.Render(entry, nil)
+			s.addWatches(w, entry) // imports may have changed
 		case _, ok := <-w.Errors:
 			if !ok {
 				return
@@ -104,9 +134,9 @@ func (s *server) watch() {
 	}
 }
 
-// addWatches (re)adds every file in the current module graph to the watcher.
-func (s *server) addWatches(w *fsnotify.Watcher) {
-	_, files, _, _ := resolver.Graph(s.entry, nil)
+// addWatches (re)adds every file in entry's module graph to the watcher.
+func (s *Server) addWatches(w *fsnotify.Watcher, entry string) {
+	_, files, _, _ := resolver.Graph(entry, nil)
 	for path := range files {
 		_ = w.Add(path)
 	}
@@ -114,7 +144,7 @@ func (s *server) addWatches(w *fsnotify.Watcher) {
 
 // --- broadcast --------------------------------------------------------------
 
-func (s *server) broadcast() {
+func (s *Server) broadcast() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for ch := range s.clients {
@@ -127,7 +157,7 @@ func (s *server) broadcast() {
 
 // --- handlers ---------------------------------------------------------------
 
-func (s *server) handleSVG(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleSVG(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
 	svg := s.svg
 	s.mu.RUnlock()
@@ -135,15 +165,15 @@ func (s *server) handleSVG(w http.ResponseWriter, _ *http.Request) {
 	w.Write(svg)
 }
 
-func (s *server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
-	msg := s.errMsg
+	msg, title := s.errMsg, s.title
 	s.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"error":%q}`, msg)
+	fmt.Fprintf(w, `{"error":%q,"title":%q}`, msg, title)
 }
 
-func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -175,7 +205,7 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *server) handleIndex(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, indexHTML)
 }

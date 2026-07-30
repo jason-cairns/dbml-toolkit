@@ -32,6 +32,11 @@ command = "dbml"
 args = ["lsp"]
 ```
 
+Opening a `.dbml` file in an LSP editor automatically opens a live browser
+preview that re-renders from the editor buffer as you type. Set
+`DBML_PREVIEW=off` to disable it, or `DBML_PREVIEW=manual` to serve the preview
+without auto-opening a browser.
+
 Typst — build the plugin with `make wasm`, then:
 
 ```typ

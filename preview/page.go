@@ -26,6 +26,7 @@ const indexHTML = `<!doctype html>
         fetch('/status').then(r => r.json()),
       ]);
       if (svg.trim()) document.getElementById('view').innerHTML = svg;
+      if (status.title) document.title = 'dbml — ' + status.title.split('/').pop();
       const bar = document.getElementById('bar');
       if (status.error && status.error.trim()) {
         bar.style.display = 'block';

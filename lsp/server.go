@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/jason-cairns/dbml-toolkit/ast"
+	"github.com/jason-cairns/dbml-toolkit/dot"
 	"github.com/jason-cairns/dbml-toolkit/model"
+	"github.com/jason-cairns/dbml-toolkit/preview"
 	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
@@ -52,15 +55,31 @@ type diagnostic struct {
 	Message  string `json:"message"`
 }
 
-// Server holds the open-document overlay.
+// Server holds the open-document overlay and the live preview.
 type Server struct {
-	conn *conn
-	docs map[string]string // path -> content
+	conn        *conn
+	docs        map[string]string // path -> content
+	preview     *preview.Server   // live browser preview (nil if disabled)
+	previewOpen bool              // auto-open the browser on first document
 }
 
-// Serve runs the language server until the input stream closes.
+// Serve runs the language server until the input stream closes. Opening a
+// document launches a live browser preview that re-renders from the editor
+// buffer on every change. The DBML_PREVIEW env var tunes this:
+//   - "0"/"off"/"false": no preview
+//   - "manual"/"noopen": serve the preview but do not open a browser
+//   - anything else (default): serve and auto-open the browser
 func Serve(r io.Reader, w io.Writer) error {
-	s := &Server{conn: newConn(r, w), docs: map[string]string{}}
+	s := &Server{conn: newConn(r, w), docs: map[string]string{}, previewOpen: true}
+	switch strings.ToLower(os.Getenv("DBML_PREVIEW")) {
+	case "0", "off", "false":
+		// preview disabled
+	case "manual", "noopen":
+		s.preview = preview.New(dot.Options{})
+		s.previewOpen = false
+	default:
+		s.preview = preview.New(dot.Options{})
+	}
 	for {
 		m, err := s.conn.read()
 		if err != nil {
@@ -116,6 +135,19 @@ func (s *Server) setDoc(uri, text string) {
 	path := uriToPath(uri)
 	s.docs[path] = text
 	s.publishDiagnostics(uri)
+	s.updatePreview(path)
+}
+
+// updatePreview lazily launches the browser preview (opening the browser once)
+// and re-renders it from the current editor buffers.
+func (s *Server) updatePreview(path string) {
+	if s.preview == nil {
+		return
+	}
+	if _, err := s.preview.Listen(0, s.previewOpen); err != nil {
+		return
+	}
+	s.preview.Render(path, s.docs)
 }
 
 func (s *Server) publishDiagnostics(uri string) {
