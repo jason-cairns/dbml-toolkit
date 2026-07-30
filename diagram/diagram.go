@@ -4,6 +4,8 @@
 package diagram
 
 import (
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jason-cairns/dbml-toolkit/model"
@@ -39,12 +41,14 @@ const (
 )
 
 // Options configures an engine. Zero value = crow's-foot, full detail, no
-// notes, schema names shown.
+// notes, schema names shown, default theme, animated relationships.
 type Options struct {
-	Detail   Detail
-	Notation Notation
-	Notes    bool
-	NoSchema bool
+	Detail    Detail
+	Notation  Notation
+	Notes     bool
+	NoSchema  bool
+	Theme     int64 // D2 theme id; 0 = engine default
+	NoAnimate bool  // disable animated relationship edges (D2)
 }
 
 // Engine renders a resolved schema to bytes in one of its supported formats.
@@ -86,6 +90,42 @@ func ParseNotation(s string) (Notation, bool) {
 		return Label, true
 	}
 	return Crowfoot, false
+}
+
+// themes maps friendly names to D2 theme ids (see d2themescatalog).
+var themes = map[string]int64{
+	"neutral": 0, "neutral-grey": 1, "flagship": 3, "cool-classics": 4,
+	"mixed-berry-blue": 5, "grape-soda": 6, "aubergine": 7, "colorblind": 8,
+	"vanilla-nitro-cola": 100, "orange-creamsicle": 101, "shirley-temple": 102,
+	"earth-tones": 103, "everglade-green": 104, "buttered-toast": 105,
+	"dark-mauve": 200, "dark-flagship": 201, "terminal": 300,
+	"terminal-grayscale": 301, "origami": 302, "c4": 303,
+}
+
+// ParseTheme maps a CLI string (a friendly name or a numeric id) to a theme id.
+// "" yields 0, which each engine interprets as its default theme.
+func ParseTheme(s string) (int64, bool) {
+	if s == "" {
+		return 0, true
+	}
+	key := strings.ReplaceAll(strings.ToLower(s), " ", "-")
+	if id, ok := themes[key]; ok {
+		return id, true
+	}
+	if id, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return id, true
+	}
+	return 0, false
+}
+
+// ThemeNames lists the recognised theme names.
+func ThemeNames() []string {
+	names := make([]string, 0, len(themes))
+	for n := range themes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // ParseFormat maps a CLI string to a Format.

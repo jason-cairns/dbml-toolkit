@@ -29,7 +29,8 @@ func TestD2Script(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(out)
-	for _, want := range []string{"shape: sql_table", "users", "orders", "->"} {
+	// tables + a group container ("shop") + a connection + a tooltip note.
+	for _, want := range []string{"shape: sql_table", "users", "orders", "->", "shop", "tooltip"} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("d2 script missing %q:\n%s", want, src)
 		}

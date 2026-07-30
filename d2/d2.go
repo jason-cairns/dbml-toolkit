@@ -25,6 +25,7 @@ import (
 	d2log "oss.terrastruct.com/d2/lib/log"
 	"oss.terrastruct.com/d2/lib/textmeasure"
 
+	"github.com/jason-cairns/dbml-toolkit/ast"
 	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/model"
 )
@@ -51,7 +52,7 @@ func (Engine) Render(s *model.Schema, opt diagram.Options, f diagram.Format) ([]
 		return []byte(d2format.Format(g.AST)), nil
 	}
 	ctx := quiet(context.Background())
-	dg, err := layout(ctx, g)
+	dg, err := layout(ctx, g, themeID(opt.Theme))
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +71,21 @@ func quiet(ctx context.Context) context.Context {
 	return d2log.With(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
+// defaultTheme is the D2 theme used when none is set (Flagship Terrastruct).
+const defaultTheme int64 = 3
+
+// themeID resolves the effective theme (0 = default).
+func themeID(t int64) int64 {
+	if t == 0 {
+		return defaultTheme
+	}
+	return t
+}
+
 // layout runs ELK over the built graph and exports a render-ready diagram,
 // mirroring d2lib's internal pipeline via exported calls (no re-serialization).
-func layout(ctx context.Context, g *d2graph.Graph) (*d2target.Diagram, error) {
-	if err := g.ApplyTheme(0); err != nil {
+func layout(ctx context.Context, g *d2graph.Graph, theme int64) (*d2target.Diagram, error) {
+	if err := g.ApplyTheme(theme); err != nil {
 		return nil, err
 	}
 	ruler, err := textmeasure.NewRuler()
@@ -123,9 +135,31 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 	b := &builder{g: g}
 	b.set("direction", "right")
 
+	// TableGroups become plain containers; grouped tables are created inside
+	// them (container prefix in the key) so no reparenting/Move is needed.
+	group := map[*model.Table]string{}
+	for gi, grp := range s.Groups {
+		gid := fmt.Sprintf("g%d", gi)
+		b.create(gid)
+		if grp.Name != "" {
+			b.set(gid, grp.Name)
+		}
+		if c := settingColor(grp); c != "" {
+			b.set(gid+".style.fill", c)
+		}
+		if grp.Note != "" {
+			b.set(gid+".tooltip", grp.Note)
+		}
+		for _, m := range grp.Members {
+			if t := s.Lookup(qual(m.Schema, m.Table)); t != nil {
+				group[t] = gid + "."
+			}
+		}
+	}
+
 	ids := map[*model.Table]string{}
 	for i, t := range s.Tables {
-		id := fmt.Sprintf("t%d", i)
+		id := group[t] + fmt.Sprintf("t%d", i)
 		ids[t] = id
 		b.create(id)
 		b.set(id+".shape", "sql_table")
@@ -139,17 +173,16 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 					continue
 				}
 				col := id + "." + key(c.Name)
-				typ := c.Type
-				if c.NotNull {
-					typ = strings.TrimSpace(typ + " NN")
-				}
-				b.set(col, typ)
+				b.set(col, c.Type)
 				if cst := constraintOf(c); cst != "" {
 					b.set(col+".constraint", cst)
 				}
+				if c.Note != "" {
+					b.set(col+".tooltip", c.Note)
+				}
 			}
 		}
-		if opt.Notes && t.Note != "" {
+		if t.Note != "" {
 			b.set(id+".tooltip", t.Note)
 		}
 	}
@@ -174,20 +207,19 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 		specs = append(specs, edgeSpec{fromMany, toMany, optional(r.From), optional(r.To)})
 	}
 
-	if opt.Notes {
-		for i, n := range s.Notes {
-			nid := fmt.Sprintf("note%d", i)
-			b.create(nid)
-			b.set(nid+".shape", "text")
-			b.set(nid, n.Text)
-		}
+	for i, n := range s.Notes {
+		nid := fmt.Sprintf("note%d", i)
+		b.create(nid)
+		b.set(nid+".shape", "text")
+		b.set(nid, n.Text)
 	}
 	if b.err != nil {
 		return nil, b.err
 	}
 
-	// Final pass: arrowheads set directly on edge objects (no more oracle edits
-	// after this, so nothing recompiles them away).
+	// Final pass on the edge objects (no more oracle edits after this): crow's-
+	// foot arrowheads and animation. The source arrowhead only renders when
+	// SrcArrow is set, so enable it explicitly (otherwise only one end shows).
 	for i, sp := range specs {
 		if i >= len(b.g.Edges) {
 			break
@@ -197,11 +229,33 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 			e.SrcArrowhead = arrowLabel(card(sp.fromMany, sp.fromOpt))
 			e.DstArrowhead = arrowLabel(card(sp.toMany, sp.toOpt))
 		} else {
+			e.SrcArrow = true
 			e.SrcArrowhead = arrowShape(crowfoot(sp.fromMany, sp.fromOpt))
 			e.DstArrowhead = arrowShape(crowfoot(sp.toMany, sp.toOpt))
 		}
+		if !opt.NoAnimate {
+			e.Style.Animated = &d2graph.Scalar{Value: "true"}
+		}
 	}
 	return b.g, nil
+}
+
+// settingColor returns a TableGroup's color setting, if any.
+func settingColor(g *ast.TableGroup) string {
+	for _, s := range g.Settings {
+		if strings.EqualFold(s.Name, "color") {
+			return s.Value
+		}
+	}
+	return ""
+}
+
+// qual joins an optional schema and name.
+func qual(schema, name string) string {
+	if schema == "" {
+		return name
+	}
+	return schema + "." + name
 }
 
 type edgeSpec struct{ fromMany, toMany, fromOpt, toOpt bool }

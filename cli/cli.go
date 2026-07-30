@@ -60,7 +60,9 @@ func cmdRender(args []string) int {
 	format := fs.String("format", "svg", "output format: svg|ascii|dot|d2 (per engine)")
 	detail := fs.String("detail", "full", "detail level: full|keys|tables")
 	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
-	notes := fs.Bool("notes", false, "include notes in the diagram")
+	theme := fs.String("theme", "", "D2 theme name or id (default: flagship)")
+	animate := fs.Bool("animate", true, "animate relationship edges (D2)")
+	notes := fs.Bool("notes", false, "include inline notes (graphviz; D2 always uses tooltips)")
 	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
 	out := fs.String("o", "", "output file (default stdout)")
 	pos, ok := parseArgs(fs, args)
@@ -71,7 +73,7 @@ func cmdRender(args []string) int {
 		fmt.Fprintln(os.Stderr, "render: missing <entry.dbml>")
 		return 2
 	}
-	eng, opt, f, ok := setup(*engineName, *format, *detail, *notation, *notes, *noSchema)
+	eng, opt, f, ok := setup(*engineName, *format, *detail, *notation, *theme, *notes, *noSchema, *animate)
 	if !ok {
 		return 2
 	}
@@ -97,7 +99,9 @@ func cmdPreview(args []string) int {
 	noOpen := fs.Bool("no-open", false, "do not open a browser automatically")
 	detail := fs.String("detail", "full", "detail level: full|keys|tables")
 	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
-	notes := fs.Bool("notes", false, "include notes in the diagram")
+	theme := fs.String("theme", "", "D2 theme name or id (default: flagship)")
+	animate := fs.Bool("animate", true, "animate relationship edges (D2)")
+	notes := fs.Bool("notes", false, "include inline notes (graphviz; D2 always uses tooltips)")
 	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
 	pos, ok := parseArgs(fs, args)
 	if !ok {
@@ -107,7 +111,7 @@ func cmdPreview(args []string) int {
 		fmt.Fprintln(os.Stderr, "preview: missing <file.dbml>")
 		return 2
 	}
-	eng, opt, _, ok := setup(*engineName, "svg", *detail, *notation, *notes, *noSchema)
+	eng, opt, _, ok := setup(*engineName, "svg", *detail, *notation, *theme, *notes, *noSchema, *animate)
 	if !ok {
 		return 2
 	}
@@ -160,32 +164,35 @@ func cmdLSP(_ []string) int {
 // --- helpers ----------------------------------------------------------------
 
 // setup resolves the engine, options and format, reporting usage errors.
-func setup(engineName, format, detail, notation string, notes, noSchema bool) (diagram.Engine, diagram.Options, diagram.Format, bool) {
+func setup(engineName, format, detail, notation, theme string, notes, noSchema, animate bool) (diagram.Engine, diagram.Options, diagram.Format, bool) {
+	fail := func(msg string) (diagram.Engine, diagram.Options, diagram.Format, bool) {
+		fmt.Fprintln(os.Stderr, msg)
+		return nil, diagram.Options{}, "", false
+	}
 	eng, ok := render.Get(engineName)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --engine %q (want %s)\n", engineName, strings.Join(render.Names(), "|"))
-		return nil, diagram.Options{}, "", false
+		return fail(fmt.Sprintf("invalid --engine %q (want %s)", engineName, strings.Join(render.Names(), "|")))
 	}
 	d, ok := diagram.ParseDetail(detail)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --detail %q (want full|keys|tables)\n", detail)
-		return nil, diagram.Options{}, "", false
+		return fail(fmt.Sprintf("invalid --detail %q (want full|keys|tables)", detail))
 	}
 	n, ok := diagram.ParseNotation(notation)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --notation %q (want crowfoot|label)\n", notation)
-		return nil, diagram.Options{}, "", false
+		return fail(fmt.Sprintf("invalid --notation %q (want crowfoot|label)", notation))
+	}
+	th, ok := diagram.ParseTheme(theme)
+	if !ok {
+		return fail(fmt.Sprintf("invalid --theme %q", theme))
 	}
 	f, ok := diagram.ParseFormat(format)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --format %q\n", format)
-		return nil, diagram.Options{}, "", false
+		return fail(fmt.Sprintf("invalid --format %q", format))
 	}
 	if !diagram.Supports(eng, f) {
-		fmt.Fprintf(os.Stderr, "engine %q does not support format %q\n", eng.Name(), f)
-		return nil, diagram.Options{}, "", false
+		return fail(fmt.Sprintf("engine %q does not support format %q", eng.Name(), f))
 	}
-	return eng, diagram.Options{Detail: d, Notation: n, Notes: notes, NoSchema: noSchema}, f, true
+	return eng, diagram.Options{Detail: d, Notation: n, Notes: notes, NoSchema: noSchema, Theme: th, NoAnimate: !animate}, f, true
 }
 
 // parseArgs parses flags that may be interspersed with positional arguments

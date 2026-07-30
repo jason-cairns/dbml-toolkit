@@ -22,7 +22,8 @@ dbml lsp                                       # language server over stdio
 
 - `--engine`: `d2` (default) or `graphviz`.
 - `--format`: `svg` (default) / `ascii` / `d2` (d2 source) for the D2 engine; `svg` / `dot` for Graphviz.
-- `--detail`: `full` (default) / `keys` / `tables`. `--notation`: `crowfoot` (default) / `label`. `--notes`, `--no-schema`.
+- `--detail`: `full` (default) / `keys` / `tables`. `--notation`: `crowfoot` (default) / `label`. `--no-schema`.
+- D2 only: `--theme` (name or id, default `flagship`), `--animate` (default on). TableGroups render as containers and notes as tooltips.
 
 Helix (`~/.config/helix/languages.toml`):
 
