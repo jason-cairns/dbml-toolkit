@@ -1,0 +1,8 @@
+# Build artifacts (never committed — CI builds these for releases)
+/dbml
+/dist/
+*.wasm
+*.svg
+*.pdf
+*.html
+coverage.out
