@@ -281,11 +281,12 @@ func (p *parser) parseIndexes() []*ast.Index {
 }
 
 func (p *parser) indexField() ast.IndexField {
+	pos := p.cur().Pos
 	if p.cur().Kind == token.Expr {
-		return ast.IndexField{Text: p.next().Lit, Expr: true}
+		return ast.IndexField{Text: p.next().Lit, Expr: true, Pos: pos}
 	}
 	n, _ := p.name()
-	return ast.IndexField{Text: n}
+	return ast.IndexField{Text: n, Pos: pos}
 }
 
 func (p *parser) parseChecks() []ast.Check {
@@ -359,15 +360,17 @@ func (p *parser) refOp() string {
 // endpoint parses [schema.]table.column or [schema.]table.(col, col).
 func (p *parser) endpoint() ast.Endpoint {
 	e := ast.Endpoint{Pos: p.cur().Pos}
-	first, _ := p.name()
+	first, fpos := p.name()
 	parts := []string{first}
+	partPos := []token.Pos{fpos}
 	for p.cur().Kind == token.Dot {
 		p.next()
 		if p.cur().Kind == token.LParen { // composite columns
 			p.next()
 			for p.cur().Kind != token.RParen && p.cur().Kind != token.EOF {
-				n, _ := p.name()
+				n, npos := p.name()
 				e.Columns = append(e.Columns, n)
+				e.ColPos = append(e.ColPos, npos)
 				if !acceptComma(p) {
 					break
 				}
@@ -376,11 +379,13 @@ func (p *parser) endpoint() ast.Endpoint {
 			setSchemaName(parts, &e.Schema, &e.Table)
 			return e
 		}
-		n, _ := p.name()
+		n, npos := p.name()
 		parts = append(parts, n)
+		partPos = append(partPos, npos)
 	}
 	// last part is the single column
 	e.Columns = []string{parts[len(parts)-1]}
+	e.ColPos = []token.Pos{partPos[len(partPos)-1]}
 	setSchemaName(parts[:len(parts)-1], &e.Schema, &e.Table)
 	return e
 }

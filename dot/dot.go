@@ -23,17 +23,20 @@ const (
 type Notation int
 
 const (
-	// Label draws plain edges annotated with 1 / * / 0..1 cardinality text.
-	Label Notation = iota
 	// Crowfoot draws crow's-foot endpoints (crow/tee/odot arrowhead glyphs).
-	Crowfoot
+	// It is the zero value, so it is the default notation.
+	Crowfoot Notation = iota
+	// Label draws plain edges annotated with 1 / * / 0..1 cardinality text.
+	Label
 )
 
-// Options configures the emitter.
+// Options configures the emitter. Zero value = crow's-foot, full detail, no
+// notes, schema names shown.
 type Options struct {
 	Detail   Detail
 	Notation Notation
 	Notes    bool
+	NoSchema bool // hide schema qualifiers in table headers
 }
 
 // ParseDetail maps a CLI string to a Detail.
@@ -52,12 +55,12 @@ func ParseDetail(s string) (Detail, bool) {
 // ParseNotation maps a CLI string to a Notation.
 func ParseNotation(s string) (Notation, bool) {
 	switch strings.ToLower(s) {
-	case "label", "":
-		return Label, true
-	case "crowfoot", "crow":
+	case "crowfoot", "crow", "":
 		return Crowfoot, true
+	case "label":
+		return Label, true
 	}
-	return Label, false
+	return Crowfoot, false
 }
 
 type builder struct {
@@ -105,17 +108,22 @@ func (bd *builder) printf(format string, args ...any) {
 func (bd *builder) table(t *model.Table) {
 	id := bd.nodeID[t]
 	bd.port[t] = map[string]string{}
-	header := t.Name
+
+	var head strings.Builder
+	if !bd.opt.NoSchema && t.Schema != "" && t.Schema != "public" {
+		fmt.Fprintf(&head, `<font color="#cbd5e1" point-size="9">%s</font><br/>`, esc(t.Schema))
+	}
+	fmt.Fprintf(&head, "<b>%s</b>", esc(t.Name))
 	if t.Alias != "" {
-		header += " (" + t.Alias + ")"
+		fmt.Fprintf(&head, ` <font point-size="9">(%s)</font>`, esc(t.Alias))
 	}
 	hc := t.HeaderColor
 	if hc == "" {
 		hc = "#334155"
 	}
 	var rows strings.Builder
-	fmt.Fprintf(&rows, `<tr><td bgcolor="%s" port="__h"><font color="white"><b>%s</b></font></td></tr>`,
-		hc, esc(header))
+	fmt.Fprintf(&rows, `<tr><td colspan="3" bgcolor="%s" port="__h"><font color="white">%s</font></td></tr>`,
+		hc, head.String())
 
 	if bd.opt.Detail != Tables {
 		for ci, c := range t.Columns {
@@ -128,68 +136,89 @@ func (bd *builder) table(t *model.Table) {
 		}
 	}
 	if bd.opt.Notes && t.Note != "" {
-		fmt.Fprintf(&rows, `<tr><td align="left"><font color="#64748b"><i>%s</i></font></td></tr>`, esc(t.Note))
+		fmt.Fprintf(&rows, `<tr><td colspan="3" align="left"><font color="#64748b"><i>%s</i></font></td></tr>`, esc(t.Note))
 	}
 
 	bd.printf("  %s [label=<<table border=\"0\" cellborder=\"1\" cellspacing=\"0\" cellpadding=\"6\">%s</table>>];\n",
 		id, rows.String())
 }
 
+// columnRow renders one column as a three-cell grid row: name (left), type
+// (right), constraint badges (right). Ports "cN" (name/west side) and "cNr"
+// (badge/east side) let edges attach to either table edge at this row.
 func (bd *builder) columnRow(c *model.Column, port string) string {
 	name := esc(c.Name)
 	if c.PK {
 		name = "<b>" + name + "</b>"
 	}
-	var marks []string
-	if c.PK {
-		marks = append(marks, "pk")
-	}
-	if c.FK {
-		marks = append(marks, "fk")
-	}
-	if c.Unique {
-		marks = append(marks, "u")
-	}
-	suffix := ""
-	if len(marks) > 0 {
-		suffix = ` <font color="#94a3b8">` + esc(strings.Join(marks, ",")) + `</font>`
-	}
 	typ := ""
 	if c.Type != "" {
-		typ = `  <font color="#64748b">` + esc(c.Type) + `</font>`
+		typ = `<font color="#64748b">` + esc(c.Type) + `</font>`
 	}
-	note := ""
+	row := fmt.Sprintf(
+		`<tr><td align="left" port="%s">%s</td><td align="right">%s</td><td align="right" port="%sr">%s</td></tr>`,
+		port, name, typ, port, badges(c))
 	if bd.opt.Notes && c.Note != "" {
-		note = `<br/><font color="#94a3b8"><i>` + esc(c.Note) + `</i></font>`
+		row += fmt.Sprintf(`<tr><td colspan="3" align="left"><font color="#94a3b8"><i>%s</i></font></td></tr>`, esc(c.Note))
 	}
-	return fmt.Sprintf(`<tr><td align="left" port="%s">%s%s%s%s</td></tr>`, port, name, typ, suffix, note)
+	return row
 }
 
-// anchor returns the DOT endpoint (node:port) for one side of a ref.
-func (bd *builder) anchor(e model.Endpoint) (string, bool) {
+// badges renders PK/FK/NN/U constraint chips as small filled boxes.
+func badges(c *model.Column) string {
+	var tags []string
+	if c.PK {
+		tags = append(tags, "PK")
+	}
+	if c.FK {
+		tags = append(tags, "FK")
+	}
+	if c.NotNull {
+		tags = append(tags, "NN")
+	}
+	if c.Unique {
+		tags = append(tags, "U")
+	}
+	if len(tags) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<table border="0" cellborder="0" cellspacing="3" cellpadding="2"><tr>`)
+	for _, t := range tags {
+		fmt.Fprintf(&b, `<td bgcolor="#e2e8f0"><font point-size="8" color="#475569">%s</font></td>`, t)
+	}
+	b.WriteString(`</tr></table>`)
+	return b.String()
+}
+
+// anchor returns the DOT endpoint for one side of a ref. side is "e" (east /
+// table right edge, via the badge cell) or "w" (west / left edge, via the name
+// cell), so edges attach to the table side aligned with the column's row.
+func (bd *builder) anchor(e model.Endpoint, side string) (string, bool) {
 	if e.Table == nil {
 		return "", false
 	}
 	id := bd.nodeID[e.Table]
 	if len(e.Columns) == 1 {
-		if port, ok := bd.port[e.Table][e.Columns[0]]; ok {
-			return fmt.Sprintf("%s:%s", id, port), true
+		if base, ok := bd.port[e.Table][e.Columns[0]]; ok {
+			port := base
+			if side == "e" {
+				port = base + "r"
+			}
+			return fmt.Sprintf("%s:%s:%s", id, port, side), true
 		}
 	}
-	return id + ":__h", true
+	return fmt.Sprintf("%s:__h:%s", id, side), true
 }
 
 func (bd *builder) edge(r *model.Ref) {
-	from, ok1 := bd.anchor(r.From)
-	to, ok2 := bd.anchor(r.To)
+	// With rankdir=LR the tail (From) ranks left of the head (To): the tail
+	// exits the east edge, the head enters the west edge.
+	from, ok1 := bd.anchor(r.From, "e")
+	to, ok2 := bd.anchor(r.To, "w")
 	if !ok1 || !ok2 {
 		return
 	}
-	// Compass points force attachment to the table's side at the column's row:
-	// with rankdir=LR the tail ranks left of the head, so the tail exits east
-	// and the head enters west.
-	from += ":e"
-	to += ":w"
 	fromMany, toMany := cardinality(r.Op)
 	fromOpt := endpointOptional(r.From)
 	toOpt := endpointOptional(r.To)

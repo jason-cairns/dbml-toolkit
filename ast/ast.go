@@ -89,6 +89,7 @@ type Index struct {
 type IndexField struct {
 	Text string
 	Expr bool
+	Pos  token.Pos
 }
 
 // Check is one entry within a `checks { }` block.
@@ -114,6 +115,7 @@ type Endpoint struct {
 	Schema  string
 	Table   string
 	Columns []string
+	ColPos  []token.Pos // source position of each column name (parallel to Columns)
 	Pos     token.Pos
 }
 

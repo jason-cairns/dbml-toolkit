@@ -259,24 +259,53 @@ func (s *Server) index(uri string) *index {
 		}
 		return name
 	}
+	// colKey identifies a column definition: "col:<qualified-table>.<column>".
+	colKey := func(qtable, col string) string { return "col:" + qtable + "." + col }
 	for _, t := range schema.Tables {
 		ix.defs[t.Qualified()] = locFor(t.NamePos.File, t.NamePos.Line, t.NamePos.Col, len(t.Name))
+		for _, c := range t.Columns {
+			ix.defs[colKey(t.Qualified(), c.Name)] = locFor(c.NamePos.File, c.NamePos.Line, c.NamePos.Col, len(c.Name))
+		}
+	}
+	// addCols records go-to-definition occurrences for the columns of an
+	// endpoint (e.g. the `id` in `users.id`) against the resolved table.
+	addCols := func(p string, e ast.Endpoint) {
+		qt := key(qual(e.Schema, e.Table))
+		for i, col := range e.Columns {
+			if i < len(e.ColPos) {
+				ix.occs = append(ix.occs, mkOcc(p, e.ColPos[i].Line, e.ColPos[i].Col, len(col), colKey(qt, col)))
+			}
+		}
 	}
 	for p, f := range files {
-		add := func(e ast.Endpoint) {
-			if e.Table == "" {
-				return
+		addTable := func(e ast.Endpoint) {
+			if e.Table != "" {
+				ix.occs = append(ix.occs, mkOcc(p, e.Pos.Line, e.Pos.Col, len(e.Table), key(qual(e.Schema, e.Table))))
 			}
-			ix.occs = append(ix.occs, mkOcc(p, e.Pos.Line, e.Pos.Col, len(e.Table), key(qual(e.Schema, e.Table))))
 		}
 		for _, t := range f.Tables {
-			ix.occs = append(ix.occs, mkOcc(p, t.NamePos.Line, t.NamePos.Col, len(t.Name), key(qual(t.Schema, t.Name))))
+			qt := key(qual(t.Schema, t.Name))
+			ix.occs = append(ix.occs, mkOcc(p, t.NamePos.Line, t.NamePos.Col, len(t.Name), qt))
+			// column definitions are also references to themselves
+			for _, c := range t.Columns {
+				ix.occs = append(ix.occs, mkOcc(p, c.NamePos.Line, c.NamePos.Col, len(c.Name), colKey(qt, c.Name)))
+			}
+			// index fields navigate to the column they index
+			for _, idx := range t.Indexes {
+				for _, fld := range idx.Fields {
+					if !fld.Expr {
+						ix.occs = append(ix.occs, mkOcc(p, fld.Pos.Line, fld.Pos.Col, len(fld.Text), colKey(qt, fld.Text)))
+					}
+				}
+			}
 		}
 		for _, r := range f.Refs {
 			if !r.Inline {
-				add(r.Left)
+				addTable(r.Left)
+				addCols(p, r.Left)
 			}
-			add(r.Right)
+			addTable(r.Right)
+			addCols(p, r.Right)
 		}
 		for _, g := range f.Groups {
 			for _, mem := range g.Members {

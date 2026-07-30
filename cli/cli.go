@@ -57,8 +57,9 @@ func cmdRender(args []string) int {
 	fs := flag.NewFlagSet("render", flag.ContinueOnError)
 	format := fs.String("format", "svg", "output format: dot|svg")
 	detail := fs.String("detail", "full", "detail level: full|keys|tables")
-	notation := fs.String("notation", "label", "relationship notation: label|crowfoot")
+	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
 	notes := fs.Bool("notes", false, "include notes in the diagram")
+	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
 	out := fs.String("o", "", "output file (default stdout)")
 	pos, ok := parseArgs(fs, args)
 	if !ok {
@@ -69,7 +70,7 @@ func cmdRender(args []string) int {
 		return 2
 	}
 	entry := pos[0]
-	opt, ok := options(*detail, *notation, *notes)
+	opt, ok := options(*detail, *notation, *notes, *noSchema)
 	if !ok {
 		return 2
 	}
@@ -143,8 +144,9 @@ func cmdPreview(args []string) int {
 	port := fs.Int("port", 0, "port to listen on (0 = pick a free port)")
 	noOpen := fs.Bool("no-open", false, "do not open a browser automatically")
 	detail := fs.String("detail", "full", "detail level: full|keys|tables")
-	notation := fs.String("notation", "label", "relationship notation: label|crowfoot")
+	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
 	notes := fs.Bool("notes", false, "include notes in the diagram")
+	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
 	pos, ok2 := parseArgs(fs, args)
 	if !ok2 {
 		return 2
@@ -154,7 +156,7 @@ func cmdPreview(args []string) int {
 		return 2
 	}
 	entry := pos[0]
-	opt, ok := options(*detail, *notation, *notes)
+	opt, ok := options(*detail, *notation, *notes, *noSchema)
 	if !ok {
 		return 2
 	}
@@ -185,7 +187,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, bool) {
 
 // --- helpers ----------------------------------------------------------------
 
-func options(detail, notation string, notes bool) (dot.Options, bool) {
+func options(detail, notation string, notes, noSchema bool) (dot.Options, bool) {
 	d, ok := dot.ParseDetail(detail)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "invalid --detail %q (want full|keys|tables)\n", detail)
@@ -193,10 +195,10 @@ func options(detail, notation string, notes bool) (dot.Options, bool) {
 	}
 	n, ok := dot.ParseNotation(notation)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --notation %q (want label|crowfoot)\n", notation)
+		fmt.Fprintf(os.Stderr, "invalid --notation %q (want crowfoot|label)\n", notation)
 		return dot.Options{}, false
 	}
-	return dot.Options{Detail: d, Notation: n, Notes: notes}, true
+	return dot.Options{Detail: d, Notation: n, Notes: notes, NoSchema: noSchema}, true
 }
 
 func writeOut(path string, data []byte) int {
