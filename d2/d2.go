@@ -200,6 +200,12 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 		}
 	}
 
+	// A failed oracle edit (e.g. a half-typed color value during live editing)
+	// can leave b.g nil, so bail before the refs loop dereferences it below.
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	// Connections are created plain via the oracle; their crow's-foot arrowheads
 	// are applied afterwards directly on the edge objects, because d2oracle can't
 	// address an edge whose endpoints are sql_table columns. specs[i] pairs with

@@ -1,6 +1,7 @@
 package d2
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,26 @@ func loadSchema(t *testing.T) *model.Schema {
 		t.Fatalf("diagnostics: %+v", diags)
 	}
 	return s
+}
+
+// A transiently-invalid color on a group (e.g. a half-typed "#" during live
+// editing) makes d2oracle reject the edit and return a nil graph. Combined with
+// a ref in the schema this used to dereference that nil graph and panic, taking
+// the whole preview/LSP process down. It must now degrade to an error instead.
+func TestD2InvalidColorWithRefDoesNotPanic(t *testing.T) {
+	const src = "TableGroup g [color: #]{\n a\n}\n" +
+		"Table a { id int [ref: > b.id] }\nTable b { id int }\n"
+	f := filepath.Join(t.TempDir(), "m.dbml")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := resolver.Load(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New().Render(s, diagram.Options{}, diagram.SVG); err == nil {
+		t.Fatal("expected an error for the invalid color, got nil")
+	}
 }
 
 func TestD2Script(t *testing.T) {
