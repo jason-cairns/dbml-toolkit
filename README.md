@@ -13,10 +13,13 @@ go install github.com/jason-cairns/dbml-toolkit/cmd/dbml@latest
 ## Usage
 
 ```bash
-dbml render --format svg --notation crowfoot --detail keys --notes schema.dbml -o schema.svg
+dbml render --format svg --layout neato --detail keys --notes schema.dbml -o schema.svg
 dbml preview schema.dbml          # live browser preview, auto-refresh
 dbml lsp                          # language server over stdio
 ```
+
+Layouts: `neato` (default, compact) / `dot` (left-to-right, column-aligned edges) /
+`fdp` / `sfdp` / `circo` / `twopi`. Notations: `crowfoot` (default) / `label`.
 
 Helix (`~/.config/helix/languages.toml`):
 

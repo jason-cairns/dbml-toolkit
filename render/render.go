@@ -9,14 +9,19 @@ import (
 	"github.com/goccy/go-graphviz"
 )
 
-// SVG renders DOT source to an SVG document.
-func SVG(dot string) ([]byte, error) {
+// SVG renders DOT source to an SVG document using the given layout engine
+// (e.g. "neato", "dot", "fdp"). An empty engine defaults to neato.
+func SVG(dot, layout string) ([]byte, error) {
+	if layout == "" {
+		layout = "neato"
+	}
 	ctx := context.Background()
 	g, err := graphviz.New(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer g.Close()
+	g.SetLayout(graphviz.Layout(layout))
 
 	graph, err := graphviz.ParseBytes([]byte(dot))
 	if err != nil {

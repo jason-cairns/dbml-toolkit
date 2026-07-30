@@ -7,7 +7,7 @@ import (
 
 func TestSVGSmoke(t *testing.T) {
 	dot := `digraph { a -> b; }`
-	out, err := SVG(dot)
+	out, err := SVG(dot, "dot")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,7 +80,7 @@ func (s *Server) Render(entry string, overlay map[string]string) {
 	s.mu.Lock()
 	if err != nil {
 		s.errMsg = err.Error()
-	} else if svg, rerr := render.SVG(dot.Emit(schema, s.opt)); rerr != nil {
+	} else if svg, rerr := render.SVG(dot.Emit(schema, s.opt), s.opt.Layout); rerr != nil {
 		s.errMsg = rerr.Error() + "\n" + msg
 	} else {
 		s.svg = svg

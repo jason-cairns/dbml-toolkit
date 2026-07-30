@@ -31,12 +31,32 @@ const (
 )
 
 // Options configures the emitter. Zero value = crow's-foot, full detail, no
-// notes, schema names shown.
+// notes, schema names shown, neato layout.
 type Options struct {
 	Detail   Detail
 	Notation Notation
 	Notes    bool
-	NoSchema bool // hide schema qualifiers in table headers
+	NoSchema bool   // hide schema qualifiers in table headers
+	Layout   string // graphviz engine: neato (default) | dot | fdp | sfdp | circo | twopi
+}
+
+// Layout returns the resolved layout engine ("" defaults to neato).
+func (o Options) layout() string {
+	if o.Layout == "" {
+		return "neato"
+	}
+	return o.Layout
+}
+
+// ParseLayout validates a layout engine name.
+func ParseLayout(s string) (string, bool) {
+	switch strings.ToLower(s) {
+	case "":
+		return "neato", true
+	case "neato", "dot", "fdp", "sfdp", "circo", "twopi":
+		return strings.ToLower(s), true
+	}
+	return "neato", false
 }
 
 // ParseDetail maps a CLI string to a Detail.
@@ -79,11 +99,19 @@ func Emit(schema *model.Schema, opt Options) string {
 func (bd *builder) emit(s *model.Schema) string {
 	p := bd.printf
 	p("digraph dbml {\n")
-	p("  rankdir=LR;\n")
-	// splines=polyline (not ortho): orthogonal routing ignores HTML-table ports
-	// when nodes sit inside a cluster (TableGroup), collapsing every edge to the
-	// table centre. polyline honours the ports, so edges line up with columns.
-	p("  graph [splines=polyline, nodesep=0.6, ranksep=1.1, bgcolor=\"transparent\"];\n")
+	p("  layout=%s;\n", bd.opt.layout())
+	switch bd.opt.layout() {
+	case "dot":
+		// splines=polyline (not ortho): orthogonal routing ignores HTML-table
+		// ports inside a cluster, collapsing edges to the table centre. polyline
+		// honours the ports so edges line up with columns.
+		p("  rankdir=LR;\n")
+		p("  graph [splines=polyline, nodesep=0.6, ranksep=1.1, bgcolor=\"transparent\"];\n")
+	default:
+		// force-directed engines: spread in 2D (more compact than dot's ranks),
+		// keep nodes from overlapping, and route edges as curves.
+		p("  graph [overlap=prism, splines=true, sep=\"+18\", esep=\"+8\", bgcolor=\"transparent\"];\n")
+	}
 	p("  node [shape=plain, fontname=\"Helvetica\", fontsize=11, fontcolor=\"#0f172a\"];\n")
 	p("  edge [fontname=\"Helvetica\", fontsize=10, color=\"#5b6b7b\"];\n\n")
 
@@ -122,7 +150,7 @@ func (bd *builder) table(t *model.Table) {
 		hc = "#334155"
 	}
 	var rows strings.Builder
-	fmt.Fprintf(&rows, `<tr><td colspan="3" bgcolor="%s" port="__h"><font color="white">%s</font></td></tr>`,
+	fmt.Fprintf(&rows, `<tr><td colspan="2" bgcolor="%s" port="__h"><font color="white">%s</font></td></tr>`,
 		hc, head.String())
 
 	if bd.opt.Detail != Tables {
@@ -136,36 +164,34 @@ func (bd *builder) table(t *model.Table) {
 		}
 	}
 	if bd.opt.Notes && t.Note != "" {
-		fmt.Fprintf(&rows, `<tr><td colspan="3" align="left"><font color="#64748b"><i>%s</i></font></td></tr>`, esc(t.Note))
+		fmt.Fprintf(&rows, `<tr><td colspan="2" align="left"><font color="#64748b"><i>%s</i></font></td></tr>`, esc(t.Note))
 	}
 
 	bd.printf("  %s [label=<<table border=\"0\" cellborder=\"1\" cellspacing=\"0\" cellpadding=\"6\">%s</table>>];\n",
 		id, rows.String())
 }
 
-// columnRow renders one column as a three-cell grid row: name (left), type
-// (right), constraint badges (right). Ports "cN" (name/west side) and "cNr"
-// (badge/east side) let edges attach to either table edge at this row.
+// columnRow renders one column as a two-cell grid row: name (left) and the type
+// with its constraint chips (right). Ports "cN" (name/west edge) and "cNr"
+// (details/east edge) let dot-layout edges attach to either table side at this
+// column's row.
 func (bd *builder) columnRow(c *model.Column, port string) string {
 	name := esc(c.Name)
 	if c.PK {
 		name = "<b>" + name + "</b>"
 	}
-	typ := ""
-	if c.Type != "" {
-		typ = `<font color="#64748b">` + esc(c.Type) + `</font>`
-	}
 	row := fmt.Sprintf(
-		`<tr><td align="left" port="%s">%s</td><td align="right">%s</td><td align="right" port="%sr">%s</td></tr>`,
-		port, name, typ, port, badges(c))
+		`<tr><td align="left" port="%s">%s</td><td align="right" port="%sr">%s</td></tr>`,
+		port, name, port, details(c))
 	if bd.opt.Notes && c.Note != "" {
-		row += fmt.Sprintf(`<tr><td colspan="3" align="left"><font color="#94a3b8"><i>%s</i></font></td></tr>`, esc(c.Note))
+		row += fmt.Sprintf(`<tr><td colspan="2" align="left"><font color="#94a3b8"><i>%s</i></font></td></tr>`, esc(c.Note))
 	}
 	return row
 }
 
-// badges renders PK/FK/NN/U constraint chips as small filled boxes.
-func badges(c *model.Column) string {
+// details renders the column type followed by PK/FK/NN/U chips, as a single
+// right-aligned run (type text plus small filled badge boxes).
+func details(c *model.Column) string {
 	var tags []string
 	if c.PK {
 		tags = append(tags, "PK")
@@ -179,11 +205,14 @@ func badges(c *model.Column) string {
 	if c.Unique {
 		tags = append(tags, "U")
 	}
-	if len(tags) == 0 {
+	if c.Type == "" && len(tags) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(`<table border="0" cellborder="0" cellspacing="3" cellpadding="2"><tr>`)
+	b.WriteString(`<table border="0" cellborder="0" cellspacing="4" cellpadding="1"><tr>`)
+	if c.Type != "" {
+		fmt.Fprintf(&b, `<td><font color="#64748b">%s</font></td>`, esc(c.Type))
+	}
 	for _, t := range tags {
 		fmt.Fprintf(&b, `<td bgcolor="#e2e8f0"><font point-size="8" color="#475569">%s</font></td>`, t)
 	}
@@ -191,9 +220,9 @@ func badges(c *model.Column) string {
 	return b.String()
 }
 
-// anchor returns the DOT endpoint for one side of a ref. side is "e" (east /
-// table right edge, via the badge cell) or "w" (west / left edge, via the name
-// cell), so edges attach to the table side aligned with the column's row.
+// anchor returns a dot-layout endpoint attached to the table side aligned with
+// the column's row: side "w" (west, via the name cell) or "e" (east, via the
+// details cell).
 func (bd *builder) anchor(e model.Endpoint, side string) (string, bool) {
 	if e.Table == nil {
 		return "", false
@@ -201,21 +230,37 @@ func (bd *builder) anchor(e model.Endpoint, side string) (string, bool) {
 	id := bd.nodeID[e.Table]
 	if len(e.Columns) == 1 {
 		if base, ok := bd.port[e.Table][e.Columns[0]]; ok {
-			port := base
 			if side == "e" {
-				port = base + "r"
+				base += "r"
 			}
-			return fmt.Sprintf("%s:%s:%s", id, port, side), true
+			return fmt.Sprintf("%s:%s:%s", id, base, side), true
 		}
 	}
 	return fmt.Sprintf("%s:__h:%s", id, side), true
 }
 
+// nodeAnchor attaches an edge to the whole table node (used by force-directed
+// layouts, where left/right compass sides are meaningless).
+func (bd *builder) nodeAnchor(e model.Endpoint) (string, bool) {
+	if e.Table == nil {
+		return "", false
+	}
+	return bd.nodeID[e.Table], true
+}
+
 func (bd *builder) edge(r *model.Ref) {
-	// With rankdir=LR the tail (From) ranks left of the head (To): the tail
-	// exits the east edge, the head enters the west edge.
-	from, ok1 := bd.anchor(r.From, "e")
-	to, ok2 := bd.anchor(r.To, "w")
+	var from, to string
+	var ok1, ok2 bool
+	if bd.opt.layout() == "dot" {
+		// With rankdir=LR the tail (From) ranks left of the head (To): the tail
+		// exits the east edge, the head enters the west edge, aligned to the row.
+		from, ok1 = bd.anchor(r.From, "e")
+		to, ok2 = bd.anchor(r.To, "w")
+	} else {
+		// Force-directed: attach to the whole table (no fixed side).
+		from, ok1 = bd.nodeAnchor(r.From)
+		to, ok2 = bd.nodeAnchor(r.To)
+	}
 	if !ok1 || !ok2 {
 		return
 	}
