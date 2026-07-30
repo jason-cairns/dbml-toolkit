@@ -77,8 +77,8 @@ func (bd *builder) emit(s *model.Schema) string {
 	p := bd.printf
 	p("digraph dbml {\n")
 	p("  rankdir=LR;\n")
-	p("  graph [splines=ortho, nodesep=0.6, ranksep=1.0, bgcolor=\"transparent\"];\n")
-	p("  node [shape=plain, fontname=\"Helvetica\", fontsize=11];\n")
+	p("  graph [splines=ortho, nodesep=0.6, ranksep=1.0, bgcolor=\"white\"];\n")
+	p("  node [shape=plain, fontname=\"Helvetica\", fontsize=11, fontcolor=\"#0f172a\"];\n")
 	p("  edge [fontname=\"Helvetica\", fontsize=10, color=\"#5b6b7b\"];\n\n")
 
 	for i, t := range s.Tables {
@@ -196,10 +196,7 @@ func (bd *builder) edge(r *model.Ref) {
 
 func (bd *builder) groups(s *model.Schema) {
 	for i, g := range s.Groups {
-		bd.printf("  subgraph cluster_g%d {\n    label=\"%s\";\n    style=\"rounded\";\n", i, esc(g.Name))
-		if g.Note != "" {
-			bd.printf("    color=\"#94a3b8\";\n")
-		}
+		bd.printf("  subgraph cluster_g%d {\n    label=\"%s\";\n    style=\"rounded\";\n    color=\"#cbd5e1\";\n    fontcolor=\"#334155\";\n", i, esc(g.Name))
 		for _, m := range g.Members {
 			if t := s.Lookup(qualified(m.Schema, m.Table)); t != nil {
 				bd.printf("    %s;\n", bd.nodeID[t])
