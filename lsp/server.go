@@ -81,6 +81,11 @@ func Serve(r io.Reader, w io.Writer) error {
 	default:
 		s.preview = preview.New(d2.New(), diagram.Options{})
 	}
+	// Tie the preview's lifetime to the editor connection: when the stream
+	// closes (or the client stops reading and our writes start failing), tear
+	// the HTTP server down instead of leaving an orphaned preview serving a
+	// stale diagram.
+	defer s.preview.Close()
 	for {
 		m, err := s.conn.read()
 		if err != nil {
@@ -90,6 +95,11 @@ func Serve(r io.Reader, w io.Writer) error {
 			return err
 		}
 		s.handle(m)
+		// A failed write means the client is gone; stop rather than block
+		// forever in the next read with a preview no one is driving.
+		if s.conn.werr != nil {
+			return s.conn.werr
+		}
 	}
 }
 

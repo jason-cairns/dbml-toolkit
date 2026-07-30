@@ -33,6 +33,7 @@ type Server struct {
 
 	addr string
 	once sync.Once
+	http *http.Server
 }
 
 // New creates a preview server that renders with the given engine and options.
@@ -57,7 +58,8 @@ func (s *Server) Listen(port int, open bool) (string, error) {
 		mux.HandleFunc("/svg", s.handleSVG)
 		mux.HandleFunc("/status", s.handleStatus)
 		mux.HandleFunc("/events", s.handleEvents)
-		go http.Serve(ln, mux)
+		s.http = &http.Server{Handler: mux}
+		go s.http.Serve(ln)
 		if open {
 			openBrowser(s.addr)
 		}
@@ -67,6 +69,17 @@ func (s *Server) Listen(port int, open bool) (string, error) {
 
 // Addr returns the server address (empty until Listen succeeds).
 func (s *Server) Addr() string { return s.addr }
+
+// Close shuts down the HTTP server and frees its port. It is safe to call on a
+// server that never bound (Listen was not called or failed) and is idempotent.
+// Any connected browsers get a dropped SSE stream and stop refreshing. Once
+// closed, the server should not be reused.
+func (s *Server) Close() error {
+	if s == nil || s.http == nil {
+		return nil
+	}
+	return s.http.Close()
+}
 
 // Render rebuilds the diagram for entry (resolving imports through overlay when
 // non-nil) and notifies connected browsers. The previous diagram is preserved

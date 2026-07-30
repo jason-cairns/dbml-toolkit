@@ -28,6 +28,30 @@ func TestServerRenders(t *testing.T) {
 	}
 }
 
+func TestCloseStopsServing(t *testing.T) {
+	s := New(dot.New(), diagram.Options{})
+	addr, err := s.Listen(0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := http.Get(addr + "/status"); err != nil {
+		t.Fatalf("server should serve before Close: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := http.Get(addr + "/status"); err == nil {
+		t.Fatalf("server should refuse connections after Close")
+	}
+	// Close is idempotent and safe on an unbound server.
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if err := New(dot.New(), diagram.Options{}).Close(); err != nil {
+		t.Fatalf("Close on unbound server: %v", err)
+	}
+}
+
 func get(t *testing.T, url string) string {
 	t.Helper()
 	resp, err := http.Get(url)

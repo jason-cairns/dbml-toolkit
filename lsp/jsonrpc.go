@@ -26,8 +26,9 @@ type rpcError struct {
 
 // conn frames JSON-RPC messages over an LSP stdio stream.
 type conn struct {
-	r *bufio.Reader
-	w io.Writer
+	r    *bufio.Reader
+	w    io.Writer
+	werr error // first write failure, e.g. the client closed the pipe
 }
 
 func newConn(r io.Reader, w io.Writer) *conn {
@@ -87,8 +88,12 @@ func (c *conn) send(m *message) error {
 		return err
 	}
 	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
+		c.werr = err
 		return err
 	}
-	_, err = c.w.Write(body)
-	return err
+	if _, err := c.w.Write(body); err != nil {
+		c.werr = err
+		return err
+	}
+	return nil
 }
