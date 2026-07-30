@@ -2,7 +2,7 @@
 
 # Build the dbml CLI.
 build:
-	go build -o dbml .
+	go build -o dbml ./cmd/dbml
 
 # Run the full test suite.
 test:
@@ -12,13 +12,14 @@ test:
 lint:
 	golangci-lint run
 
-# Build the Typst plugin (requires tinygo). Not committed — a release/build artifact.
+# Experimental Typst plugin (requires tinygo), gated behind the `typst` build
+# tag and not built in CI/releases. Not committed — a build artifact.
 wasm:
-	tinygo build -o typst/dbml.wasm -target=wasm-unknown -gc=conservative ./typst/plugin
+	tinygo build -o typst/dbml.wasm -target=wasm-unknown -gc=conservative -tags typst ./typst/plugin
 
 # Install the CLI into $GOBIN / $GOPATH/bin.
 install:
-	go install .
+	go install ./cmd/dbml
 
 # Render the example diagram and compile the Typst example to a PDF.
 typst-example: wasm

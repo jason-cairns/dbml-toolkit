@@ -12,7 +12,8 @@ import (
 	"strings"
 
 	"github.com/jason-cairns/dbml-toolkit/ast"
-	"github.com/jason-cairns/dbml-toolkit/dot"
+	"github.com/jason-cairns/dbml-toolkit/d2"
+	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/model"
 	"github.com/jason-cairns/dbml-toolkit/preview"
 	"github.com/jason-cairns/dbml-toolkit/resolver"
@@ -75,10 +76,10 @@ func Serve(r io.Reader, w io.Writer) error {
 	case "0", "off", "false":
 		// preview disabled
 	case "manual", "noopen":
-		s.preview = preview.New(dot.Options{})
+		s.preview = preview.New(d2.New(), diagram.Options{})
 		s.previewOpen = false
 	default:
-		s.preview = preview.New(dot.Options{})
+		s.preview = preview.New(d2.New(), diagram.Options{})
 	}
 	for {
 		m, err := s.conn.read()

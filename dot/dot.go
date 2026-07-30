@@ -1,77 +1,71 @@
-// Package dot renders a resolved model.Schema into Graphviz DOT using
-// HTML-like table labels. Two relationship notations are supported and three
-// levels of detail.
+// Package dot is the graphviz rendering engine: it renders a resolved
+// model.Schema into Graphviz DOT (HTML-like table labels) and, via the pure-Go
+// go-graphviz engine, to SVG. It implements diagram.Engine.
 package dot
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/goccy/go-graphviz"
+	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/model"
 )
 
-// Detail controls how much of each table is drawn.
-type Detail int
+// Engine is the graphviz diagram.Engine.
+type Engine struct{}
 
-const (
-	Full   Detail = iota // every column
-	Keys                 // only pk / fk / unique columns
-	Tables               // table names only
-)
+// New returns the graphviz engine.
+func New() Engine { return Engine{} }
 
-// Notation controls how relationship endpoints are drawn.
-type Notation int
+func (Engine) Name() string { return "graphviz" }
 
-const (
-	// Crowfoot draws crow's-foot endpoints (crow/tee/odot arrowhead glyphs).
-	// It is the zero value, so it is the default notation.
-	Crowfoot Notation = iota
-	// Label draws plain edges annotated with 1 / * / 0..1 cardinality text.
-	Label
-)
+func (Engine) Formats() []diagram.Format { return []diagram.Format{diagram.SVG, diagram.DOT} }
 
-// Options configures the emitter. Zero value = crow's-foot, full detail, no
-// notes, schema names shown.
-type Options struct {
-	Detail   Detail
-	Notation Notation
-	Notes    bool
-	NoSchema bool // hide schema qualifiers in table headers
+// Render produces DOT or SVG for the schema.
+func (Engine) Render(s *model.Schema, opt diagram.Options, f diagram.Format) ([]byte, error) {
+	src := Emit(s, opt)
+	switch f {
+	case diagram.DOT:
+		return []byte(src), nil
+	case diagram.SVG:
+		return svg(src)
+	default:
+		return nil, fmt.Errorf("graphviz: unsupported format %q", f)
+	}
 }
 
-// ParseDetail maps a CLI string to a Detail.
-func ParseDetail(s string) (Detail, bool) {
-	switch strings.ToLower(s) {
-	case "full", "":
-		return Full, true
-	case "keys":
-		return Keys, true
-	case "tables", "tables-only":
-		return Tables, true
+// svg renders DOT source to SVG with the pure-Go graphviz engine.
+func svg(dotSrc string) ([]byte, error) {
+	ctx := context.Background()
+	g, err := graphviz.New(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return Full, false
-}
-
-// ParseNotation maps a CLI string to a Notation.
-func ParseNotation(s string) (Notation, bool) {
-	switch strings.ToLower(s) {
-	case "crowfoot", "crow", "":
-		return Crowfoot, true
-	case "label":
-		return Label, true
+	defer g.Close()
+	graph, err := graphviz.ParseBytes([]byte(dotSrc))
+	if err != nil {
+		return nil, err
 	}
-	return Crowfoot, false
+	defer graph.Close()
+	var buf bytes.Buffer
+	if err := g.Render(ctx, graph, graphviz.SVG, &buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 type builder struct {
 	b      strings.Builder
-	opt    Options
+	opt    diagram.Options
 	nodeID map[*model.Table]string
 	port   map[*model.Table]map[string]string
 }
 
 // Emit renders schema to DOT text.
-func Emit(schema *model.Schema, opt Options) string {
+func Emit(schema *model.Schema, opt diagram.Options) string {
 	bd := &builder{opt: opt, nodeID: map[*model.Table]string{}, port: map[*model.Table]map[string]string{}}
 	return bd.emit(schema)
 }
@@ -126,9 +120,9 @@ func (bd *builder) table(t *model.Table) {
 	fmt.Fprintf(&rows, `<tr><td bgcolor="%s" port="__h"><font color="white">%s</font></td></tr>`,
 		hc, head.String())
 
-	if bd.opt.Detail != Tables {
+	if bd.opt.Detail != diagram.Tables {
 		for ci, c := range t.Columns {
-			if bd.opt.Detail == Keys && !c.IsKey() {
+			if bd.opt.Detail == diagram.Keys && !c.IsKey() {
 				continue
 			}
 			portName := fmt.Sprintf("c%d", ci)
@@ -214,7 +208,7 @@ func (bd *builder) edge(r *model.Ref) {
 	fromMany, toMany := cardinality(r.Op)
 	fromOpt := endpointOptional(r.From)
 	toOpt := endpointOptional(r.To)
-	if bd.opt.Notation == Crowfoot {
+	if bd.opt.Notation == diagram.Crowfoot {
 		bd.printf("  %s -> %s [dir=both, arrowtail=%s, arrowhead=%s];\n",
 			from, to, crow(fromMany, fromOpt), crow(toMany, toOpt))
 	} else {

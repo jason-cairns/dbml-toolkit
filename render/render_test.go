@@ -1,17 +1,17 @@
 package render
 
-import (
-	"bytes"
-	"testing"
-)
+import "testing"
 
-func TestSVGSmoke(t *testing.T) {
-	dot := `digraph { a -> b; }`
-	out, err := SVG(dot)
-	if err != nil {
-		t.Fatal(err)
+func TestFactory(t *testing.T) {
+	for _, name := range []string{"", "d2", "graphviz", "dot"} {
+		if _, ok := Get(name); !ok {
+			t.Fatalf("engine %q not found", name)
+		}
 	}
-	if !bytes.Contains(out, []byte("<svg")) {
-		t.Fatalf("expected an <svg element, got %d bytes", len(out))
+	if e, _ := Get(""); e.Name() != "d2" {
+		t.Fatalf("default engine = %s, want d2", e.Name())
+	}
+	if _, ok := Get("nope"); ok {
+		t.Fatal("unknown engine should not resolve")
 	}
 }

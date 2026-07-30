@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
@@ -18,7 +19,7 @@ func loadExample(t *testing.T) string {
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics: %+v", diags)
 	}
-	return Emit(schema, Options{})
+	return Emit(schema, diagram.Options{})
 }
 
 func TestEmitFull(t *testing.T) {
@@ -34,9 +35,9 @@ func TestDetailLevels(t *testing.T) {
 	p := filepath.Join("..", "testdata", "ecommerce.dbml")
 	schema, _, _ := resolver.Load(p)
 
-	full := Emit(schema, Options{Detail: Full})
-	keys := Emit(schema, Options{Detail: Keys})
-	tables := Emit(schema, Options{Detail: Tables})
+	full := Emit(schema, diagram.Options{Detail: diagram.Full})
+	keys := Emit(schema, diagram.Options{Detail: diagram.Keys})
+	tables := Emit(schema, diagram.Options{Detail: diagram.Tables})
 
 	// "name" is a non-key column on users; present only at full detail.
 	if !strings.Contains(full, "name") {
@@ -55,11 +56,11 @@ func TestNotations(t *testing.T) {
 	p := filepath.Join("..", "testdata", "ecommerce.dbml")
 	schema, _, _ := resolver.Load(p)
 
-	crow := Emit(schema, Options{Notation: Crowfoot})
+	crow := Emit(schema, diagram.Options{Notation: diagram.Crowfoot})
 	if !strings.Contains(crow, "arrowtail=crow") {
 		t.Fatalf("crowfoot notation missing crow arrowtail:\n%s", crow)
 	}
-	label := Emit(schema, Options{Notation: Label})
+	label := Emit(schema, diagram.Options{Notation: diagram.Label})
 	if !strings.Contains(label, "taillabel=\"*\"") {
 		t.Fatalf("label notation missing cardinality label")
 	}
@@ -69,8 +70,8 @@ func TestNotesFlag(t *testing.T) {
 	p := filepath.Join("..", "testdata", "ecommerce.dbml")
 	schema, _, _ := resolver.Load(p)
 
-	with := Emit(schema, Options{Notes: true})
-	without := Emit(schema, Options{Notes: false})
+	with := Emit(schema, diagram.Options{Notes: true})
+	without := Emit(schema, diagram.Options{Notes: false})
 	if !strings.Contains(with, "registered customers") {
 		t.Fatal("notes flag should include the table note")
 	}

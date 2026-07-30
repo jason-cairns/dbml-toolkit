@@ -1,5 +1,5 @@
 // Package cli implements the `dbml` command-line interface: a thin dispatch
-// over the parser, emitter, LSP server and live preview.
+// over the parser, rendering engines, LSP server and live preview.
 package cli
 
 import (
@@ -7,8 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
-	"github.com/jason-cairns/dbml-toolkit/dot"
+	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/lsp"
 	"github.com/jason-cairns/dbml-toolkit/model"
 	"github.com/jason-cairns/dbml-toolkit/preview"
@@ -19,7 +20,7 @@ import (
 const usage = `dbml — a DBML toolkit
 
 Usage:
-  dbml render  [flags] <entry.dbml>   render a diagram (DOT or SVG)
+  dbml render  [flags] <entry.dbml>   render a diagram
   dbml preview [flags] <file.dbml>    live browser preview with auto-refresh
   dbml lsp                            run the language server over stdio
   dbml parse   [flags] <entry.dbml>   parse and report the resolved model
@@ -55,7 +56,8 @@ func Run(args []string, version string) int {
 
 func cmdRender(args []string) int {
 	fs := flag.NewFlagSet("render", flag.ContinueOnError)
-	format := fs.String("format", "svg", "output format: dot|svg")
+	engineName := fs.String("engine", render.Default, "engine: d2|graphviz")
+	format := fs.String("format", "svg", "output format: svg|ascii|dot|d2 (per engine)")
 	detail := fs.String("detail", "full", "detail level: full|keys|tables")
 	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
 	notes := fs.Bool("notes", false, "include notes in the diagram")
@@ -69,34 +71,51 @@ func cmdRender(args []string) int {
 		fmt.Fprintln(os.Stderr, "render: missing <entry.dbml>")
 		return 2
 	}
-	entry := pos[0]
-	opt, ok := options(*detail, *notation, *notes, *noSchema)
+	eng, opt, f, ok := setup(*engineName, *format, *detail, *notation, *notes, *noSchema)
 	if !ok {
 		return 2
 	}
-	schema, diags, err := resolver.Load(entry)
+	schema, diags, err := resolver.Load(pos[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	reportDiags(diags)
 
-	dotSrc := dot.Emit(schema, opt)
-	var data []byte
-	switch *format {
-	case "dot":
-		data = []byte(dotSrc)
-	case "svg":
-		data, err = render.SVG(dotSrc)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "render:", err)
-			return 1
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "render: unknown format %q\n", *format)
-		return 2
+	data, err := eng.Render(schema, opt, f)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "render:", err)
+		return 1
 	}
 	return writeOut(*out, data)
+}
+
+func cmdPreview(args []string) int {
+	fs := flag.NewFlagSet("preview", flag.ContinueOnError)
+	engineName := fs.String("engine", render.Default, "engine: d2|graphviz")
+	port := fs.Int("port", 0, "port to listen on (0 = pick a free port)")
+	noOpen := fs.Bool("no-open", false, "do not open a browser automatically")
+	detail := fs.String("detail", "full", "detail level: full|keys|tables")
+	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
+	notes := fs.Bool("notes", false, "include notes in the diagram")
+	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
+	pos, ok := parseArgs(fs, args)
+	if !ok {
+		return 2
+	}
+	if len(pos) == 0 {
+		fmt.Fprintln(os.Stderr, "preview: missing <file.dbml>")
+		return 2
+	}
+	eng, opt, _, ok := setup(*engineName, "svg", *detail, *notation, *notes, *noSchema)
+	if !ok {
+		return 2
+	}
+	if err := preview.Serve(pos[0], *port, !*noOpen, eng, opt); err != nil {
+		fmt.Fprintln(os.Stderr, "preview:", err)
+		return 1
+	}
+	return 0
 }
 
 func cmdParse(args []string) int {
@@ -110,8 +129,7 @@ func cmdParse(args []string) int {
 		fmt.Fprintln(os.Stderr, "parse: missing <entry.dbml>")
 		return 2
 	}
-	entry := pos[0]
-	schema, diags, err := resolver.Load(entry)
+	schema, diags, err := resolver.Load(pos[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -131,7 +149,7 @@ func cmdParse(args []string) int {
 	return 0
 }
 
-func cmdLSP(args []string) int {
+func cmdLSP(_ []string) int {
 	if err := lsp.Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "lsp:", err)
 		return 1
@@ -139,37 +157,39 @@ func cmdLSP(args []string) int {
 	return 0
 }
 
-func cmdPreview(args []string) int {
-	fs := flag.NewFlagSet("preview", flag.ContinueOnError)
-	port := fs.Int("port", 0, "port to listen on (0 = pick a free port)")
-	noOpen := fs.Bool("no-open", false, "do not open a browser automatically")
-	detail := fs.String("detail", "full", "detail level: full|keys|tables")
-	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
-	notes := fs.Bool("notes", false, "include notes in the diagram")
-	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
-	pos, ok2 := parseArgs(fs, args)
-	if !ok2 {
-		return 2
-	}
-	if len(pos) == 0 {
-		fmt.Fprintln(os.Stderr, "preview: missing <file.dbml>")
-		return 2
-	}
-	entry := pos[0]
-	opt, ok := options(*detail, *notation, *notes, *noSchema)
+// --- helpers ----------------------------------------------------------------
+
+// setup resolves the engine, options and format, reporting usage errors.
+func setup(engineName, format, detail, notation string, notes, noSchema bool) (diagram.Engine, diagram.Options, diagram.Format, bool) {
+	eng, ok := render.Get(engineName)
 	if !ok {
-		return 2
+		fmt.Fprintf(os.Stderr, "invalid --engine %q (want %s)\n", engineName, strings.Join(render.Names(), "|"))
+		return nil, diagram.Options{}, "", false
 	}
-	if err := preview.Serve(entry, *port, !*noOpen, opt); err != nil {
-		fmt.Fprintln(os.Stderr, "preview:", err)
-		return 1
+	d, ok := diagram.ParseDetail(detail)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "invalid --detail %q (want full|keys|tables)\n", detail)
+		return nil, diagram.Options{}, "", false
 	}
-	return 0
+	n, ok := diagram.ParseNotation(notation)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "invalid --notation %q (want crowfoot|label)\n", notation)
+		return nil, diagram.Options{}, "", false
+	}
+	f, ok := diagram.ParseFormat(format)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "invalid --format %q\n", format)
+		return nil, diagram.Options{}, "", false
+	}
+	if !diagram.Supports(eng, f) {
+		fmt.Fprintf(os.Stderr, "engine %q does not support format %q\n", eng.Name(), f)
+		return nil, diagram.Options{}, "", false
+	}
+	return eng, diagram.Options{Detail: d, Notation: n, Notes: notes, NoSchema: noSchema}, f, true
 }
 
 // parseArgs parses flags that may be interspersed with positional arguments
-// (Go's flag package otherwise stops at the first positional) and returns the
-// collected positionals. It reports false if parsing failed.
+// (Go's flag package otherwise stops at the first positional).
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, bool) {
 	var positional []string
 	for {
@@ -183,22 +203,6 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, bool) {
 		positional = append(positional, rest[0])
 		args = rest[1:]
 	}
-}
-
-// --- helpers ----------------------------------------------------------------
-
-func options(detail, notation string, notes, noSchema bool) (dot.Options, bool) {
-	d, ok := dot.ParseDetail(detail)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --detail %q (want full|keys|tables)\n", detail)
-		return dot.Options{}, false
-	}
-	n, ok := dot.ParseNotation(notation)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --notation %q (want crowfoot|label)\n", notation)
-		return dot.Options{}, false
-	}
-	return dot.Options{Detail: d, Notation: n, Notes: notes, NoSchema: noSchema}, true
 }
 
 func writeOut(path string, data []byte) int {

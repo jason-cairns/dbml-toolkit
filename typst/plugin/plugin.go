@@ -1,4 +1,4 @@
-//go:build tinygo.wasm
+//go:build tinygo.wasm && typst
 
 // Command plugin is the Typst WebAssembly plugin. It exposes dbml_to_dot via
 // the Typst "wasm minimal protocol": DBML source in, Graphviz DOT out. The DOT

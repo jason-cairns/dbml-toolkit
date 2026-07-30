@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/dot"
 )
 
 func TestServerRenders(t *testing.T) {
-	s := New(dot.Options{})
+	s := New(dot.New(), diagram.Options{})
 	addr, err := s.Listen(0, false) // bind, do not open a browser
 	if err != nil {
 		t.Fatal(err)

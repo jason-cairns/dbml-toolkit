@@ -15,15 +15,15 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/jason-cairns/dbml-toolkit/dot"
-	"github.com/jason-cairns/dbml-toolkit/render"
+	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/resolver"
 )
 
 // Server is a live-preview HTTP server. Create with New, bind with Listen, and
 // push new content with Render.
 type Server struct {
-	opt dot.Options
+	engine diagram.Engine
+	opt    diagram.Options
 
 	mu      sync.RWMutex
 	svg     []byte
@@ -35,9 +35,9 @@ type Server struct {
 	once sync.Once
 }
 
-// New creates a preview server with the given render options.
-func New(opt dot.Options) *Server {
-	return &Server{opt: opt, clients: map[chan struct{}]struct{}{}}
+// New creates a preview server that renders with the given engine and options.
+func New(engine diagram.Engine, opt diagram.Options) *Server {
+	return &Server{engine: engine, opt: opt, clients: map[chan struct{}]struct{}{}}
 }
 
 // Listen binds a port (0 picks a free one), serves in the background and, if
@@ -80,7 +80,7 @@ func (s *Server) Render(entry string, overlay map[string]string) {
 	s.mu.Lock()
 	if err != nil {
 		s.errMsg = err.Error()
-	} else if svg, rerr := render.SVG(dot.Emit(schema, s.opt)); rerr != nil {
+	} else if svg, rerr := s.engine.Render(schema, s.opt, diagram.SVG); rerr != nil {
 		s.errMsg = rerr.Error() + "\n" + msg
 	} else {
 		s.svg = svg
@@ -94,8 +94,8 @@ func (s *Server) Render(entry string, overlay map[string]string) {
 // Serve is the standalone `dbml preview` entry point: it renders entry from
 // disk, opens a browser, then blocks, re-rendering whenever the file or one of
 // its imports changes on disk.
-func Serve(entry string, port int, open bool, opt dot.Options) error {
-	s := New(opt)
+func Serve(entry string, port int, open bool, engine diagram.Engine, opt diagram.Options) error {
+	s := New(engine, opt)
 	addr, err := s.Listen(port, open)
 	if err != nil {
 		return err

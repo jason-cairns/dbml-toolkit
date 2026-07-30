@@ -1,32 +1,27 @@
-// Package render turns Graphviz DOT text into SVG using the pure-Go
-// go-graphviz engine (no system Graphviz required).
+// Package render is the composition root: it is the only package that knows
+// about every rendering engine, exposing them by name behind the neutral
+// diagram.Engine interface so callers (cli, preview) stay engine-agnostic.
 package render
 
 import (
-	"bytes"
-	"context"
-
-	"github.com/goccy/go-graphviz"
+	"github.com/jason-cairns/dbml-toolkit/d2"
+	"github.com/jason-cairns/dbml-toolkit/diagram"
+	"github.com/jason-cairns/dbml-toolkit/dot"
 )
 
-// SVG renders DOT source to an SVG document with the dot layout engine.
-func SVG(dot string) ([]byte, error) {
-	ctx := context.Background()
-	g, err := graphviz.New(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer g.Close()
+// Default is the engine used when none is specified.
+const Default = "d2"
 
-	graph, err := graphviz.ParseBytes([]byte(dot))
-	if err != nil {
-		return nil, err
+// Get returns the engine registered under name ("" = Default).
+func Get(name string) (diagram.Engine, bool) {
+	switch name {
+	case "", "d2":
+		return d2.New(), true
+	case "graphviz", "dot":
+		return dot.New(), true
 	}
-	defer graph.Close()
-
-	var buf bytes.Buffer
-	if err := g.Render(ctx, graph, graphviz.SVG, &buf); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return nil, false
 }
+
+// Names lists the available engine names.
+func Names() []string { return []string{"d2", "graphviz"} }

@@ -19,12 +19,7 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
-    files: [README.md, LICENSE, typst/dbml.typ]
-
-release:
-  # The Typst plugin (built with TinyGo in CI) ships as a release asset.
-  extra_files:
-    - glob: typst/dbml.wasm
+    files: [README.md, LICENSE]
 
 checksum:
   name_template: checksums.txt
