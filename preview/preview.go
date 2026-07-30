@@ -85,23 +85,41 @@ func (s *Server) Close() error {
 // non-nil) and notifies connected browsers. The previous diagram is preserved
 // on error so the view never goes blank.
 func (s *Server) Render(entry string, overlay map[string]string) {
+	svg, errMsg := s.renderResult(entry, overlay)
+	s.mu.Lock()
+	if svg != nil { // keep the last good diagram on error so the view never blanks
+		s.svg = svg
+	}
+	s.errMsg = errMsg
+	s.title = entry
+	s.mu.Unlock()
+	s.broadcast()
+}
+
+// renderResult resolves and renders entry, returning the new SVG (nil to keep
+// the previous one) and a status/error string. It recovers from panics in the
+// resolver or diagram engine: a live editor buffer passes through many
+// transiently-invalid states, and a crash here must never take down a caller
+// such as the language server — it degrades to an error message instead.
+func (s *Server) renderResult(entry string, overlay map[string]string) (svg []byte, errMsg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			svg, errMsg = nil, fmt.Sprintf("preview render panicked: %v", r)
+		}
+	}()
 	schema, diags, err := resolver.LoadSource(entry, overlay)
 	msg := ""
 	for _, d := range diags {
 		msg += d.Pos.String() + ": " + d.Msg + "\n"
 	}
-	s.mu.Lock()
 	if err != nil {
-		s.errMsg = err.Error()
-	} else if svg, rerr := s.engine.Render(schema, s.opt, diagram.SVG); rerr != nil {
-		s.errMsg = rerr.Error() + "\n" + msg
-	} else {
-		s.svg = svg
-		s.errMsg = msg
+		return nil, err.Error()
 	}
-	s.title = entry
-	s.mu.Unlock()
-	s.broadcast()
+	out, rerr := s.engine.Render(schema, s.opt, diagram.SVG)
+	if rerr != nil {
+		return nil, rerr.Error() + "\n" + msg
+	}
+	return out, msg
 }
 
 // Serve is the standalone `dbml preview` entry point: it renders entry from

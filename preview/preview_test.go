@@ -3,12 +3,14 @@ package preview
 import (
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jason-cairns/dbml-toolkit/diagram"
 	"github.com/jason-cairns/dbml-toolkit/dot"
+	"github.com/jason-cairns/dbml-toolkit/model"
 )
 
 func TestServerRenders(t *testing.T) {
@@ -25,6 +27,33 @@ func TestServerRenders(t *testing.T) {
 	}
 	if status := get(t, addr+"/status"); !strings.Contains(status, "ecommerce.dbml") {
 		t.Fatalf("/status missing active file title: %s", status)
+	}
+}
+
+// panicEngine stands in for a diagram engine that blows up mid-render.
+type panicEngine struct{}
+
+func (panicEngine) Name() string              { return "boom" }
+func (panicEngine) Formats() []diagram.Format { return []diagram.Format{diagram.SVG} }
+func (panicEngine) Render(*model.Schema, diagram.Options, diagram.Format) ([]byte, error) {
+	panic("kaboom")
+}
+
+// A panic in the diagram engine must not escape Render: the live LSP drives it
+// from its main goroutine, so a crash here would take the whole server down.
+func TestRenderRecoversFromEnginePanic(t *testing.T) {
+	s := New(panicEngine{}, diagram.Options{})
+	if _, err := s.Listen(0, false); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "m.dbml")
+	if err := os.WriteFile(f, []byte("Table a { id int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.Render(f, map[string]string{f: "Table a { id int }\n"}) // must not panic
+	if status := get(t, s.Addr()+"/status"); !strings.Contains(status, "panicked") {
+		t.Fatalf("status should report the render panic, got: %s", status)
 	}
 }
 
