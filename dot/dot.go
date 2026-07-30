@@ -31,56 +31,12 @@ const (
 )
 
 // Options configures the emitter. Zero value = crow's-foot, full detail, no
-// notes, schema names shown, dot layout, left-to-right.
+// notes, schema names shown.
 type Options struct {
 	Detail   Detail
 	Notation Notation
 	Notes    bool
-	NoSchema bool   // hide schema qualifiers in table headers
-	Layout   string // graphviz engine: dot (default) | neato | fdp | sfdp | circo | twopi
-	Rankdir  string // dot orientation: LR (default) | TB
-}
-
-// layout returns the resolved engine ("" defaults to dot — the only engine that
-// ranks tables and routes edges cleanly; force-directed engines sprawl and run
-// links back through tables).
-func (o Options) layout() string {
-	if o.Layout == "" {
-		return "dot"
-	}
-	return o.Layout
-}
-
-// rankdir returns the resolved dot orientation ("" defaults to TB, which keeps
-// height bounded by the tallest single table — much more compact than LR for
-// the wide star/snowflake schemas common in practice).
-func (o Options) rankdir() string {
-	if o.Rankdir == "" {
-		return "TB"
-	}
-	return o.Rankdir
-}
-
-// ParseLayout validates a layout engine name.
-func ParseLayout(s string) (string, bool) {
-	switch strings.ToLower(s) {
-	case "":
-		return "dot", true
-	case "dot", "neato", "fdp", "sfdp", "circo", "twopi":
-		return strings.ToLower(s), true
-	}
-	return "dot", false
-}
-
-// ParseRankdir validates a dot orientation.
-func ParseRankdir(s string) (string, bool) {
-	switch strings.ToUpper(s) {
-	case "":
-		return "TB", true
-	case "LR", "TB":
-		return strings.ToUpper(s), true
-	}
-	return "TB", false
+	NoSchema bool // hide schema qualifiers in table headers
 }
 
 // ParseDetail maps a CLI string to a Detail.
@@ -123,19 +79,12 @@ func Emit(schema *model.Schema, opt Options) string {
 func (bd *builder) emit(s *model.Schema) string {
 	p := bd.printf
 	p("digraph dbml {\n")
-	p("  layout=%s;\n", bd.opt.layout())
 	// splines=polyline routes edges as node-avoiding segments (not ortho, which
-	// ignores HTML-table ports inside clusters). Every column row is a
-	// full-width port cell, so edges attach to the side facing the peer at the
-	// right row without cutting through the table.
-	switch bd.opt.layout() {
-	case "dot":
-		p("  rankdir=%s;\n", bd.opt.rankdir())
-		p("  graph [splines=polyline, nodesep=0.5, ranksep=1.0, bgcolor=\"transparent\"];\n")
-	default:
-		// force-directed engines: spread in 2D (more compact than dot's ranks).
-		p("  graph [overlap=prism, splines=polyline, sep=\"+18\", esep=\"+8\", bgcolor=\"transparent\"];\n")
-	}
+	// ignores HTML-table ports inside clusters). Every column row is a full-width
+	// port cell, so edges attach to the side facing the peer at the right row
+	// without cutting through the table.
+	p("  rankdir=LR;\n")
+	p("  graph [splines=polyline, nodesep=0.5, ranksep=1.0, bgcolor=\"transparent\"];\n")
 	p("  node [shape=plain, fontname=\"Helvetica\", fontsize=11, fontcolor=\"#0f172a\"];\n")
 	p("  edge [fontname=\"Helvetica\", fontsize=10, color=\"#5b6b7b\"];\n\n")
 
