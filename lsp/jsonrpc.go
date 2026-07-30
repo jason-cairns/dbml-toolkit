@@ -64,8 +64,14 @@ func (c *conn) read() (*message, error) {
 	return &m, nil
 }
 
-// reply sends a response to a request id.
+// reply sends a response to a request id. A nil result is encoded as an
+// explicit JSON null: a JSON-RPC response must carry either "result" or
+// "error", and omitting both yields a message strict clients (e.g. Helix)
+// reject, tearing down the connection.
 func (c *conn) reply(id json.RawMessage, result any) error {
+	if result == nil {
+		result = json.RawMessage("null")
+	}
 	return c.send(&message{JSONRPC: "2.0", ID: id, Result: result})
 }
 

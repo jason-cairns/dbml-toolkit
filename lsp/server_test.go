@@ -1,11 +1,35 @@
 package lsp
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// A JSON-RPC response must carry "result" or "error"; a nil result must be
+// encoded as explicit null. Omitting both makes strict clients (Helix) reject
+// the message and drop the connection, freezing diagnostics and the preview.
+func TestReplyNilEncodesNullResult(t *testing.T) {
+	var buf bytes.Buffer
+	c := newConn(strings.NewReader(""), &buf)
+	if err := c.reply(json.RawMessage("3"), nil); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ := strings.Cut(buf.String(), "\r\n\r\n")
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatalf("bad response body %q: %v", body, err)
+	}
+	if _, ok := m["result"]; !ok {
+		t.Fatalf("response missing result field: %s", body)
+	}
+	if string(m["result"]) != "null" {
+		t.Fatalf("result should be null, got %s", m["result"])
+	}
+}
 
 func TestCrossFileNavigation(t *testing.T) {
 	dir := t.TempDir()
