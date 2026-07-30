@@ -11,8 +11,8 @@ const indexHTML = `<!doctype html>
   #bar { display:none; position:fixed; top:0; left:0; right:0; padding:10px 14px;
     background:#fee2e2; color:#991b1b; white-space:pre-wrap; font-family:ui-monospace,monospace;
     font-size:13px; z-index:10; box-shadow:0 2px 8px rgba(0,0,0,.15); }
-  #view { height:100%; overflow:auto; display:flex; align-items:center; justify-content:center; padding:24px; box-sizing:border-box; }
-  #view svg { max-width:98%; height:auto; }
+  #view { height:100%; overflow:auto; display:flex; align-items:safe center; justify-content:safe center; padding:24px; box-sizing:border-box; }
+  #view svg { max-width:100%; max-height:100%; width:auto; height:auto; }
 </style>
 </head>
 <body>
