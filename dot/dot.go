@@ -100,17 +100,17 @@ func (bd *builder) emit(s *model.Schema) string {
 	p := bd.printf
 	p("digraph dbml {\n")
 	p("  layout=%s;\n", bd.opt.layout())
+	// splines=polyline routes edges as node-avoiding segments (not ortho, which
+	// ignores HTML-table ports inside clusters). Every column row is a
+	// full-width port cell, so edges attach to the side facing the peer at the
+	// right row without cutting through the table.
 	switch bd.opt.layout() {
 	case "dot":
-		// splines=polyline (not ortho): orthogonal routing ignores HTML-table
-		// ports inside a cluster, collapsing edges to the table centre. polyline
-		// honours the ports so edges line up with columns.
 		p("  rankdir=LR;\n")
 		p("  graph [splines=polyline, nodesep=0.6, ranksep=1.1, bgcolor=\"transparent\"];\n")
 	default:
-		// force-directed engines: spread in 2D (more compact than dot's ranks),
-		// keep nodes from overlapping, and route edges as curves.
-		p("  graph [overlap=prism, splines=true, sep=\"+18\", esep=\"+8\", bgcolor=\"transparent\"];\n")
+		// force-directed engines: spread in 2D (more compact than dot's ranks).
+		p("  graph [overlap=prism, splines=polyline, sep=\"+18\", esep=\"+8\", bgcolor=\"transparent\"];\n")
 	}
 	p("  node [shape=plain, fontname=\"Helvetica\", fontsize=11, fontcolor=\"#0f172a\"];\n")
 	p("  edge [fontname=\"Helvetica\", fontsize=10, color=\"#5b6b7b\"];\n\n")
@@ -150,7 +150,7 @@ func (bd *builder) table(t *model.Table) {
 		hc = "#334155"
 	}
 	var rows strings.Builder
-	fmt.Fprintf(&rows, `<tr><td colspan="2" bgcolor="%s" port="__h"><font color="white">%s</font></td></tr>`,
+	fmt.Fprintf(&rows, `<tr><td bgcolor="%s" port="__h"><font color="white">%s</font></td></tr>`,
 		hc, head.String())
 
 	if bd.opt.Detail != Tables {
@@ -164,34 +164,42 @@ func (bd *builder) table(t *model.Table) {
 		}
 	}
 	if bd.opt.Notes && t.Note != "" {
-		fmt.Fprintf(&rows, `<tr><td colspan="2" align="left"><font color="#64748b"><i>%s</i></font></td></tr>`, esc(t.Note))
+		fmt.Fprintf(&rows, `<tr><td align="left"><font color="#64748b"><i>%s</i></font></td></tr>`, esc(t.Note))
 	}
 
 	bd.printf("  %s [label=<<table border=\"0\" cellborder=\"1\" cellspacing=\"0\" cellpadding=\"6\">%s</table>>];\n",
 		id, rows.String())
 }
 
-// columnRow renders one column as a two-cell grid row: name (left) and the type
-// with its constraint chips (right). Ports "cN" (name/west edge) and "cNr"
-// (details/east edge) let dot-layout edges attach to either table side at this
-// column's row.
+// columnRow renders one column as a single full-width cell (so edges attach to
+// whichever table side faces the peer, at this column's row, without cutting
+// through the table). Inside, a borderless nested table lays out the name, the
+// type, and PK/FK/NN/U chips.
 func (bd *builder) columnRow(c *model.Column, port string) string {
 	name := esc(c.Name)
 	if c.PK {
 		name = "<b>" + name + "</b>"
 	}
-	row := fmt.Sprintf(
-		`<tr><td align="left" port="%s">%s</td><td align="right" port="%sr">%s</td></tr>`,
-		port, name, port, details(c))
+	var in strings.Builder
+	in.WriteString(`<table border="0" cellborder="0" cellspacing="6" cellpadding="1"><tr>`)
+	fmt.Fprintf(&in, `<td align="left">%s</td>`, name)
+	if c.Type != "" {
+		fmt.Fprintf(&in, `<td><font color="#64748b">%s</font></td>`, esc(c.Type))
+	}
+	for _, t := range tagsFor(c) {
+		fmt.Fprintf(&in, `<td bgcolor="#e2e8f0"><font point-size="8" color="#475569">%s</font></td>`, t)
+	}
+	in.WriteString(`</tr></table>`)
+
+	row := fmt.Sprintf(`<tr><td port="%s">%s</td></tr>`, port, in.String())
 	if bd.opt.Notes && c.Note != "" {
-		row += fmt.Sprintf(`<tr><td colspan="2" align="left"><font color="#94a3b8"><i>%s</i></font></td></tr>`, esc(c.Note))
+		row += fmt.Sprintf(`<tr><td align="left"><font color="#94a3b8"><i>%s</i></font></td></tr>`, esc(c.Note))
 	}
 	return row
 }
 
-// details renders the column type followed by PK/FK/NN/U chips, as a single
-// right-aligned run (type text plus small filled badge boxes).
-func details(c *model.Column) string {
+// tagsFor lists the constraint badges for a column.
+func tagsFor(c *model.Column) []string {
 	var tags []string
 	if c.PK {
 		tags = append(tags, "PK")
@@ -205,62 +213,28 @@ func details(c *model.Column) string {
 	if c.Unique {
 		tags = append(tags, "U")
 	}
-	if c.Type == "" && len(tags) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(`<table border="0" cellborder="0" cellspacing="4" cellpadding="1"><tr>`)
-	if c.Type != "" {
-		fmt.Fprintf(&b, `<td><font color="#64748b">%s</font></td>`, esc(c.Type))
-	}
-	for _, t := range tags {
-		fmt.Fprintf(&b, `<td bgcolor="#e2e8f0"><font point-size="8" color="#475569">%s</font></td>`, t)
-	}
-	b.WriteString(`</tr></table>`)
-	return b.String()
+	return tags
 }
 
-// anchor returns a dot-layout endpoint attached to the table side aligned with
-// the column's row: side "w" (west, via the name cell) or "e" (east, via the
-// details cell).
-func (bd *builder) anchor(e model.Endpoint, side string) (string, bool) {
+// anchor attaches an edge to a column's row via its full-width port; graphviz
+// picks the table side facing the peer. No compass is used, so it works the
+// same under every layout engine.
+func (bd *builder) anchor(e model.Endpoint) (string, bool) {
 	if e.Table == nil {
 		return "", false
 	}
 	id := bd.nodeID[e.Table]
 	if len(e.Columns) == 1 {
-		if base, ok := bd.port[e.Table][e.Columns[0]]; ok {
-			if side == "e" {
-				base += "r"
-			}
-			return fmt.Sprintf("%s:%s:%s", id, base, side), true
+		if port, ok := bd.port[e.Table][e.Columns[0]]; ok {
+			return id + ":" + port, true
 		}
 	}
-	return fmt.Sprintf("%s:__h:%s", id, side), true
-}
-
-// nodeAnchor attaches an edge to the whole table node (used by force-directed
-// layouts, where left/right compass sides are meaningless).
-func (bd *builder) nodeAnchor(e model.Endpoint) (string, bool) {
-	if e.Table == nil {
-		return "", false
-	}
-	return bd.nodeID[e.Table], true
+	return id + ":__h", true
 }
 
 func (bd *builder) edge(r *model.Ref) {
-	var from, to string
-	var ok1, ok2 bool
-	if bd.opt.layout() == "dot" {
-		// With rankdir=LR the tail (From) ranks left of the head (To): the tail
-		// exits the east edge, the head enters the west edge, aligned to the row.
-		from, ok1 = bd.anchor(r.From, "e")
-		to, ok2 = bd.anchor(r.To, "w")
-	} else {
-		// Force-directed: attach to the whole table (no fixed side).
-		from, ok1 = bd.nodeAnchor(r.From)
-		to, ok2 = bd.nodeAnchor(r.To)
-	}
+	from, ok1 := bd.anchor(r.From)
+	to, ok2 := bd.anchor(r.To)
 	if !ok1 || !ok2 {
 		return
 	}
