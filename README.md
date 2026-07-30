@@ -13,13 +13,15 @@ go install github.com/jason-cairns/dbml-toolkit/cmd/dbml@latest
 ## Usage
 
 ```bash
-dbml render --format svg --layout neato --detail keys --notes schema.dbml -o schema.svg
+dbml render --format svg --rankdir TB --detail keys --notes schema.dbml -o schema.svg
 dbml preview schema.dbml          # live browser preview, auto-refresh
 dbml lsp                          # language server over stdio
 ```
 
-Layouts: `neato` (default, compact) / `dot` (left-to-right, column-aligned edges) /
-`fdp` / `sfdp` / `circo` / `twopi`. Notations: `crowfoot` (default) / `label`.
+Layout: `dot` (default) with `--rankdir TB` (default, compact for wide schemas) or
+`LR`. Other engines (`neato`/`fdp`/`sfdp`/`circo`/`twopi`) exist but sprawl for
+large schemas. Notations: `crowfoot` (default) / `label`. Detail: `full` (default) /
+`keys` / `tables`. Large tables dominate diagram size — try `--detail keys`.
 
 Helix (`~/.config/helix/languages.toml`):
 

@@ -13,7 +13,7 @@ import (
 // (e.g. "neato", "dot", "fdp"). An empty engine defaults to neato.
 func SVG(dot, layout string) ([]byte, error) {
 	if layout == "" {
-		layout = "neato"
+		layout = "dot"
 	}
 	ctx := context.Background()
 	g, err := graphviz.New(ctx)

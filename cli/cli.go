@@ -58,7 +58,8 @@ func cmdRender(args []string) int {
 	format := fs.String("format", "svg", "output format: dot|svg")
 	detail := fs.String("detail", "full", "detail level: full|keys|tables")
 	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
-	layout := fs.String("layout", "neato", "layout engine: neato|dot|fdp|sfdp|circo|twopi")
+	layout := fs.String("layout", "dot", "layout engine: dot|neato|fdp|sfdp|circo|twopi")
+	rankdir := fs.String("rankdir", "TB", "dot orientation: LR|TB (TB is more compact for wide/star schemas)")
 	notes := fs.Bool("notes", false, "include notes in the diagram")
 	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
 	out := fs.String("o", "", "output file (default stdout)")
@@ -71,7 +72,7 @@ func cmdRender(args []string) int {
 		return 2
 	}
 	entry := pos[0]
-	opt, ok := options(*detail, *notation, *layout, *notes, *noSchema)
+	opt, ok := options(*detail, *notation, *layout, *rankdir, *notes, *noSchema)
 	if !ok {
 		return 2
 	}
@@ -146,7 +147,8 @@ func cmdPreview(args []string) int {
 	noOpen := fs.Bool("no-open", false, "do not open a browser automatically")
 	detail := fs.String("detail", "full", "detail level: full|keys|tables")
 	notation := fs.String("notation", "crowfoot", "relationship notation: crowfoot|label")
-	layout := fs.String("layout", "neato", "layout engine: neato|dot|fdp|sfdp|circo|twopi")
+	layout := fs.String("layout", "dot", "layout engine: dot|neato|fdp|sfdp|circo|twopi")
+	rankdir := fs.String("rankdir", "TB", "dot orientation: LR|TB (TB is more compact for wide/star schemas)")
 	notes := fs.Bool("notes", false, "include notes in the diagram")
 	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
 	pos, ok2 := parseArgs(fs, args)
@@ -158,7 +160,7 @@ func cmdPreview(args []string) int {
 		return 2
 	}
 	entry := pos[0]
-	opt, ok := options(*detail, *notation, *layout, *notes, *noSchema)
+	opt, ok := options(*detail, *notation, *layout, *rankdir, *notes, *noSchema)
 	if !ok {
 		return 2
 	}
@@ -189,7 +191,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, bool) {
 
 // --- helpers ----------------------------------------------------------------
 
-func options(detail, notation, layout string, notes, noSchema bool) (dot.Options, bool) {
+func options(detail, notation, layout, rankdir string, notes, noSchema bool) (dot.Options, bool) {
 	d, ok := dot.ParseDetail(detail)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "invalid --detail %q (want full|keys|tables)\n", detail)
@@ -202,10 +204,15 @@ func options(detail, notation, layout string, notes, noSchema bool) (dot.Options
 	}
 	l, ok := dot.ParseLayout(layout)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "invalid --layout %q (want neato|dot|fdp|sfdp|circo|twopi)\n", layout)
+		fmt.Fprintf(os.Stderr, "invalid --layout %q (want dot|neato|fdp|sfdp|circo|twopi)\n", layout)
 		return dot.Options{}, false
 	}
-	return dot.Options{Detail: d, Notation: n, Layout: l, Notes: notes, NoSchema: noSchema}, true
+	rd, ok := dot.ParseRankdir(rankdir)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "invalid --rankdir %q (want LR|TB)\n", rankdir)
+		return dot.Options{}, false
+	}
+	return dot.Options{Detail: d, Notation: n, Layout: l, Rankdir: rd, Notes: notes, NoSchema: noSchema}, true
 }
 
 func writeOut(path string, data []byte) int {
