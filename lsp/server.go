@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jason-cairns/dbml-toolkit/ast"
 	"github.com/jason-cairns/dbml-toolkit/d2"
@@ -62,6 +63,19 @@ type Server struct {
 	docs        map[string]string // path -> content
 	preview     *preview.Server   // live browser preview (nil if disabled)
 	previewOpen bool              // auto-open the browser on first document
+
+	// The diagram render is the one slow step (hundreds of ms), so it runs on a
+	// dedicated goroutine instead of the request loop. renderWake signals it;
+	// renderJob holds the coalesced latest request, so a burst of keystrokes
+	// collapses to a single render of the newest buffer.
+	renderWake chan struct{}
+	renderMu   sync.Mutex
+	renderJob  *renderJob
+}
+
+type renderJob struct {
+	path string
+	docs map[string]string // snapshot, owned by the render goroutine
 }
 
 // Serve runs the language server until the input stream closes. Opening a
@@ -86,6 +100,13 @@ func Serve(r io.Reader, w io.Writer) error {
 	// the HTTP server down instead of leaving an orphaned preview serving a
 	// stale diagram.
 	defer s.preview.Close()
+	if s.preview != nil {
+		s.renderWake = make(chan struct{}, 1)
+		go s.renderLoop()
+		// Stop the render goroutine before Close (defers run LIFO). No setDoc
+		// runs after the read loop exits, so closing renderWake here is safe.
+		defer close(s.renderWake)
+	}
 	for {
 		m, err := s.conn.read()
 		if err != nil {
@@ -168,16 +189,45 @@ func (s *Server) setDoc(uri, text string) {
 	s.updatePreview(path)
 }
 
-// updatePreview lazily launches the browser preview (opening the browser once)
-// and re-renders it from the current editor buffers.
+// updatePreview hands the latest buffer state to the render goroutine without
+// blocking. Rendering a diagram takes hundreds of milliseconds; doing it inline
+// would stall the request loop and make interactive requests (completion,
+// hover) queue behind it and time out. Rapid edits coalesce: only the newest
+// snapshot is kept, so the render goroutine never falls behind a fast typist.
 func (s *Server) updatePreview(path string) {
 	if s.preview == nil {
 		return
 	}
-	if _, err := s.preview.Listen(0, s.previewOpen); err != nil {
-		return
+	// Snapshot the overlay so the render goroutine never races setDoc's writes.
+	snap := make(map[string]string, len(s.docs))
+	for k, v := range s.docs {
+		snap[k] = v
 	}
-	s.preview.Render(path, s.docs)
+	s.renderMu.Lock()
+	s.renderJob = &renderJob{path: path, docs: snap}
+	s.renderMu.Unlock()
+	select {
+	case s.renderWake <- struct{}{}:
+	default: // a wake-up is already pending; it will pick up the newest job
+	}
+}
+
+// renderLoop renders the diagram off the request path, one job at a time,
+// always rendering the most recent snapshot. It exits when renderWake closes.
+func (s *Server) renderLoop() {
+	for range s.renderWake {
+		s.renderMu.Lock()
+		job := s.renderJob
+		s.renderJob = nil
+		s.renderMu.Unlock()
+		if job == nil {
+			continue
+		}
+		if _, err := s.preview.Listen(0, s.previewOpen); err != nil {
+			continue
+		}
+		s.preview.Render(job.path, job.docs)
+	}
 }
 
 func (s *Server) publishDiagnostics(uri string) {
