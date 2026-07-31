@@ -115,6 +115,7 @@ func (s *Server) handle(m *message) {
 				"colorProvider":          true,
 				"completionProvider":     map[string]any{"triggerCharacters": []string{".", "~"}},
 				"documentSymbolProvider": true,
+				"foldingRangeProvider":   true,
 			},
 			"serverInfo": map[string]any{"name": "dbml-lsp"},
 		})
@@ -142,6 +143,8 @@ func (s *Server) handle(m *message) {
 		s.onCompletion(m)
 	case "textDocument/documentSymbol":
 		s.onDocumentSymbol(m)
+	case "textDocument/foldingRange":
+		s.onFoldingRange(m)
 	case "textDocument/documentColor":
 		s.onDocumentColor(m)
 	case "textDocument/colorPresentation":
