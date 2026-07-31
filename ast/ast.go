@@ -16,6 +16,7 @@ type File struct {
 	Notes    []*Note
 	Partials []*TablePartial
 	Records  []*Records
+	Comments []token.Comment // source comments, in order, captured as trivia
 }
 
 // Setting is a bracketed `[name: value]` entry. HasValue is false for flags
@@ -49,6 +50,7 @@ type ImportItem struct {
 type Project struct {
 	Name     string
 	Settings []Setting
+	Fields   []Setting // body `key: value` lines (e.g. database_type), excluding Note
 	Note     string
 	Pos      token.Pos
 }
@@ -167,6 +169,7 @@ type TablePartial struct {
 	Settings []Setting
 	Columns  []*Column
 	Indexes  []*Index
+	Note     string
 	Pos      token.Pos
 	NamePos  token.Pos
 }
@@ -176,7 +179,8 @@ type Records struct {
 	Schema  string
 	Table   string
 	Columns []string
-	Rows    [][]string
+	Rows    [][]string     // cell literals, delimiters stripped
+	Kinds   [][]token.Kind // lexical kind of each cell, parallel to Rows (for faithful re-quoting)
 	Pos     token.Pos
 }
 
