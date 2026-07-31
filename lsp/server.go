@@ -112,6 +112,7 @@ func (s *Server) handle(m *message) {
 				"definitionProvider": true,
 				"referencesProvider": true,
 				"hoverProvider":      true,
+				"colorProvider":      true,
 			},
 			"serverInfo": map[string]any{"name": "dbml-lsp"},
 		})
@@ -135,6 +136,10 @@ func (s *Server) handle(m *message) {
 		s.onReferences(m)
 	case "textDocument/hover":
 		s.onHover(m)
+	case "textDocument/documentColor":
+		s.onDocumentColor(m)
+	case "textDocument/colorPresentation":
+		s.onColorPresentation(m)
 	default:
 		if len(m.ID) > 0 {
 			s.conn.reply(m.ID, nil)
