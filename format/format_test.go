@@ -15,9 +15,14 @@ func fmtOK(t *testing.T, src string) string {
 func TestFormatCanonical(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{
-			name: "column type alignment and setting spacing",
+			name: "column name, type and settings columns all align",
 			in:   "Table users{\nid int [pk,increment]\nemail varchar(255) [not null,unique]\ncreated_at timestamp\n}\n",
-			want: "Table users {\n  id         int [pk, increment]\n  email      varchar(255) [not null, unique]\n  created_at timestamp\n}\n",
+			want: "Table users {\n  id         int          [pk, increment]\n  email      varchar(255) [not null, unique]\n  created_at timestamp\n}\n",
+		},
+		{
+			name: "unbracketed long type does not push the settings column out",
+			in:   "Table t {\n  a int [pk]\n  b date [not null]\n  c decimal\n}\n",
+			want: "Table t {\n  a int  [pk]\n  b date [not null]\n  c decimal\n}\n",
 		},
 		{
 			name: "enum with value note",
