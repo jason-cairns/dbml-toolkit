@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jason-cairns/dbml-toolkit/ast"
 	"github.com/jason-cairns/dbml-toolkit/d2"
@@ -62,6 +63,19 @@ type Server struct {
 	docs        map[string]string // path -> content
 	preview     *preview.Server   // live browser preview (nil if disabled)
 	previewOpen bool              // auto-open the browser on first document
+
+	// The diagram render is the one slow step (hundreds of ms), so it runs on a
+	// dedicated goroutine instead of the request loop. renderWake signals it;
+	// renderJob holds the coalesced latest request, so a burst of keystrokes
+	// collapses to a single render of the newest buffer.
+	renderWake chan struct{}
+	renderMu   sync.Mutex
+	renderJob  *renderJob
+}
+
+type renderJob struct {
+	path string
+	docs map[string]string // snapshot, owned by the render goroutine
 }
 
 // Serve runs the language server until the input stream closes. Opening a
@@ -86,6 +100,13 @@ func Serve(r io.Reader, w io.Writer) error {
 	// the HTTP server down instead of leaving an orphaned preview serving a
 	// stale diagram.
 	defer s.preview.Close()
+	if s.preview != nil {
+		s.renderWake = make(chan struct{}, 1)
+		go s.renderLoop()
+		// Stop the render goroutine before Close (defers run LIFO). No setDoc
+		// runs after the read loop exits, so closing renderWake here is safe.
+		defer close(s.renderWake)
+	}
 	for {
 		m, err := s.conn.read()
 		if err != nil {
@@ -108,10 +129,22 @@ func (s *Server) handle(m *message) {
 	case "initialize":
 		s.conn.reply(m.ID, map[string]any{
 			"capabilities": map[string]any{
-				"textDocumentSync":   1, // full sync
-				"definitionProvider": true,
-				"referencesProvider": true,
-				"hoverProvider":      true,
+				"textDocumentSync":       1, // full sync
+				"definitionProvider":     true,
+				"referencesProvider":     true,
+				"hoverProvider":          true,
+				"colorProvider":          true,
+				"completionProvider":     map[string]any{"triggerCharacters": []string{".", "~"}},
+				"documentSymbolProvider": true,
+				"foldingRangeProvider":   true,
+				"renameProvider":         map[string]any{"prepareProvider": true},
+				"semanticTokensProvider": map[string]any{
+					"legend": map[string]any{
+						"tokenTypes":     semTokenTypes,
+						"tokenModifiers": []string{},
+					},
+					"full": true,
+				},
 			},
 			"serverInfo": map[string]any{"name": "dbml-lsp"},
 		})
@@ -135,6 +168,22 @@ func (s *Server) handle(m *message) {
 		s.onReferences(m)
 	case "textDocument/hover":
 		s.onHover(m)
+	case "textDocument/completion":
+		s.onCompletion(m)
+	case "textDocument/documentSymbol":
+		s.onDocumentSymbol(m)
+	case "textDocument/foldingRange":
+		s.onFoldingRange(m)
+	case "textDocument/semanticTokens/full":
+		s.onSemanticTokens(m)
+	case "textDocument/prepareRename":
+		s.onPrepareRename(m)
+	case "textDocument/rename":
+		s.onRename(m)
+	case "textDocument/documentColor":
+		s.onDocumentColor(m)
+	case "textDocument/colorPresentation":
+		s.onColorPresentation(m)
 	default:
 		if len(m.ID) > 0 {
 			s.conn.reply(m.ID, nil)
@@ -149,21 +198,50 @@ func (s *Server) setDoc(uri, text string) {
 	s.updatePreview(path)
 }
 
-// updatePreview lazily launches the browser preview (opening the browser once)
-// and re-renders it from the current editor buffers.
+// updatePreview hands the latest buffer state to the render goroutine without
+// blocking. Rendering a diagram takes hundreds of milliseconds; doing it inline
+// would stall the request loop and make interactive requests (completion,
+// hover) queue behind it and time out. Rapid edits coalesce: only the newest
+// snapshot is kept, so the render goroutine never falls behind a fast typist.
 func (s *Server) updatePreview(path string) {
 	if s.preview == nil {
 		return
 	}
-	if _, err := s.preview.Listen(0, s.previewOpen); err != nil {
-		return
+	// Snapshot the overlay so the render goroutine never races setDoc's writes.
+	snap := make(map[string]string, len(s.docs))
+	for k, v := range s.docs {
+		snap[k] = v
 	}
-	s.preview.Render(path, s.docs)
+	s.renderMu.Lock()
+	s.renderJob = &renderJob{path: path, docs: snap}
+	s.renderMu.Unlock()
+	select {
+	case s.renderWake <- struct{}{}:
+	default: // a wake-up is already pending; it will pick up the newest job
+	}
+}
+
+// renderLoop renders the diagram off the request path, one job at a time,
+// always rendering the most recent snapshot. It exits when renderWake closes.
+func (s *Server) renderLoop() {
+	for range s.renderWake {
+		s.renderMu.Lock()
+		job := s.renderJob
+		s.renderJob = nil
+		s.renderMu.Unlock()
+		if job == nil {
+			continue
+		}
+		if _, err := s.preview.Listen(0, s.previewOpen); err != nil {
+			continue
+		}
+		s.preview.Render(job.path, job.docs)
+	}
 }
 
 func (s *Server) publishDiagnostics(uri string) {
 	path := uriToPath(uri)
-	_, _, diags, _ := resolver.Graph(path, s.docs)
+	schema, files, diags, _ := resolver.Graph(path, s.docs)
 	out := []diagnostic{}
 	for _, d := range diags {
 		if d.Pos.File != path {
@@ -175,6 +253,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			Message:  d.Msg,
 		})
 	}
+	out = append(out, s.lints(path, schema, files)...)
 	s.conn.notify("textDocument/publishDiagnostics", map[string]any{
 		"uri": uri, "diagnostics": out,
 	})
@@ -215,11 +294,7 @@ func (s *Server) onHover(m *message) {
 	json.Unmarshal(m.Params, &p)
 	idx := s.index(p.TextDocument.URI)
 	if o := idx.at(uriToPath(p.TextDocument.URI), p.Position); o != nil {
-		if t := idx.schema.Lookup(o.target); t != nil {
-			md := "**Table** `" + t.Qualified() + "`"
-			if t.Note != "" {
-				md += "\n\n" + t.Note
-			}
+		if md := hoverMarkdown(idx.schema, o.target); md != "" {
 			s.conn.reply(m.ID, map[string]any{
 				"contents": map[string]any{"kind": "markdown", "value": md},
 			})
@@ -227,6 +302,83 @@ func (s *Server) onHover(m *message) {
 		}
 	}
 	s.conn.reply(m.ID, nil)
+}
+
+// hoverMarkdown renders the hover card for an occurrence target, which is
+// either a table key or a "col:<qualified-table>.<column>" key.
+func hoverMarkdown(schema *model.Schema, target string) string {
+	if schema == nil {
+		return ""
+	}
+	if col, ok := strings.CutPrefix(target, "col:"); ok {
+		qtable, name, ok := strings.Cut(reverseLastDot(col), "\x00")
+		if !ok {
+			return ""
+		}
+		t := schema.Lookup(qtable)
+		if t == nil {
+			return ""
+		}
+		for _, c := range t.Columns {
+			if c.Name != name {
+				continue
+			}
+			md := "**Column** `" + c.Name + "`"
+			if c.Type != "" {
+				md += " `" + c.Type + "`"
+			}
+			if flags := columnFlags(c); flags != "" {
+				md += "\n\n" + flags
+			}
+			if c.Note != "" {
+				md += "\n\n" + c.Note
+			}
+			return md
+		}
+		return ""
+	}
+	if t := schema.Lookup(target); t != nil {
+		md := "**Table** `" + t.Qualified() + "`"
+		if t.Note != "" {
+			md += "\n\n" + t.Note
+		}
+		return md
+	}
+	return ""
+}
+
+// columnFlags summarises a column's constraint flags for hover.
+func columnFlags(c *model.Column) string {
+	var f []string
+	if c.PK {
+		f = append(f, "primary key")
+	}
+	if c.Unique {
+		f = append(f, "unique")
+	}
+	if c.NotNull {
+		f = append(f, "not null")
+	}
+	if c.Increment {
+		f = append(f, "increment")
+	}
+	if c.FK {
+		f = append(f, "foreign key")
+	}
+	if c.Default != "" {
+		f = append(f, "default: "+c.Default)
+	}
+	return strings.Join(f, ", ")
+}
+
+// reverseLastDot rewrites "schema.table.col" so the column can be split off with
+// a single strings.Cut: it returns "schema.table\x00col".
+func reverseLastDot(s string) string {
+	i := strings.LastIndex(s, ".")
+	if i < 0 {
+		return s
+	}
+	return s[:i] + "\x00" + s[i+1:]
 }
 
 // --- occurrence index -------------------------------------------------------
@@ -291,7 +443,7 @@ func (s *Server) index(uri string) *index {
 	for p, f := range files {
 		addTable := func(e ast.Endpoint) {
 			if e.Table != "" {
-				ix.occs = append(ix.occs, mkOcc(p, e.Pos.Line, e.Pos.Col, len(e.Table), key(qual(e.Schema, e.Table))))
+				ix.occs = append(ix.occs, tableRefOcc(p, e.Pos.Line, e.Pos.Col, e.Schema, e.Table, key(qual(e.Schema, e.Table))))
 			}
 		}
 		for _, t := range f.Tables {
@@ -320,11 +472,29 @@ func (s *Server) index(uri string) *index {
 		}
 		for _, g := range f.Groups {
 			for _, mem := range g.Members {
-				ix.occs = append(ix.occs, mkOcc(p, mem.Pos.Line, mem.Pos.Col, len(mem.Table), key(qual(mem.Schema, mem.Table))))
+				ix.occs = append(ix.occs, tableRefOcc(p, mem.Pos.Line, mem.Pos.Col, mem.Schema, mem.Table, key(qual(mem.Schema, mem.Table))))
 			}
 		}
 	}
 	return ix
+}
+
+// tableRefOcc builds an occurrence for a (possibly schema-qualified) table
+// reference. The whole `schema.table` text is clickable — DBML has no separate
+// schema definition to jump to, so navigating from the schema part should still
+// reach the table — while the edit range (loc) covers only the table name, so
+// rename rewrites `schema.table` to `schema.newName` rather than clobbering the
+// schema.
+func tableRefOcc(file string, line, startCol int, schema, table, target string) occurrence {
+	nameCol, hitLen := startCol, len(table)
+	if schema != "" {
+		nameCol = startCol + len(schema) + 1
+		hitLen = len(schema) + 1 + len(table)
+	}
+	o := mkOcc(file, line, nameCol, len(table), target)
+	o.char = startCol - 1 // widen the clickable span to include the schema prefix
+	o.length = hitLen
+	return o
 }
 
 func mkOcc(file string, line, col, length int, target string) occurrence {
