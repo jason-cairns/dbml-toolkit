@@ -52,6 +52,19 @@ type Token struct {
 	End  Pos // position just past the token
 }
 
+// Comment is a source comment captured as lexical trivia. The lexer discards
+// comments from the token stream but records them here so tools like the
+// formatter can splice them back in by position. Text is the comment body
+// without its delimiters. Block distinguishes /* */ from //. Trailing is true
+// when code preceded the comment on the same source line (an inline comment).
+type Comment struct {
+	Text     string
+	Pos      Pos
+	End      Pos
+	Block    bool
+	Trailing bool
+}
+
 var names = map[Kind]string{
 	EOF: "EOF", Illegal: "ILLEGAL", Ident: "IDENT", Number: "NUMBER",
 	String: "STRING", QIdent: "QIDENT", BlockString: "BLOCKSTRING", Expr: "EXPR",

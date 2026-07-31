@@ -17,8 +17,14 @@ dbml render schema.dbml -o schema.svg          # D2 (ELK) SVG, the default
 dbml render --format ascii schema.dbml         # ASCII ER diagram
 dbml render --engine graphviz schema.dbml      # Graphviz fallback
 dbml preview schema.dbml                       # live browser preview, auto-refresh
+dbml fmt schema.dbml                           # print canonical formatting to stdout
+dbml fmt -w schema.dbml                        # format the file in place
 dbml lsp                                       # language server over stdio
 ```
+
+The language server also exposes `textDocument/formatting`, so "format
+document" / format-on-save in any LSP editor reformats DBML canonically
+(comments are preserved; a file with syntax errors is left untouched).
 
 - `--engine`: `d2` (default) or `graphviz`.
 - `--format`: `svg` (default) / `ascii` / `d2` (d2 source) for the D2 engine; `svg` / `dot` for Graphviz.

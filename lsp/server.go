@@ -180,15 +180,16 @@ func (s *Server) handle(m *message) {
 	case "initialize":
 		s.conn.reply(m.ID, map[string]any{
 			"capabilities": map[string]any{
-				"textDocumentSync":       1, // full sync
-				"definitionProvider":     true,
-				"referencesProvider":     true,
-				"hoverProvider":          true,
-				"colorProvider":          true,
-				"completionProvider":     map[string]any{"triggerCharacters": []string{".", "~"}},
-				"documentSymbolProvider": true,
-				"foldingRangeProvider":   true,
-				"renameProvider":         map[string]any{"prepareProvider": true},
+				"textDocumentSync":           1, // full sync
+				"definitionProvider":         true,
+				"referencesProvider":         true,
+				"hoverProvider":              true,
+				"colorProvider":              true,
+				"completionProvider":         map[string]any{"triggerCharacters": []string{".", "~"}},
+				"documentSymbolProvider":     true,
+				"documentFormattingProvider": true,
+				"foldingRangeProvider":       true,
+				"renameProvider":             map[string]any{"prepareProvider": true},
 				"semanticTokensProvider": map[string]any{
 					"legend": map[string]any{
 						"tokenTypes":     semTokenTypes,
@@ -225,6 +226,8 @@ func (s *Server) handle(m *message) {
 		s.onDocumentSymbol(m)
 	case "textDocument/foldingRange":
 		s.onFoldingRange(m)
+	case "textDocument/formatting":
+		s.onFormatting(m)
 	case "textDocument/semanticTokens/full":
 		s.onSemanticTokens(m)
 	case "textDocument/prepareRename":

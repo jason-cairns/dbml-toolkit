@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jason-cairns/dbml-toolkit/diagram"
+	"github.com/jason-cairns/dbml-toolkit/format"
 	"github.com/jason-cairns/dbml-toolkit/lsp"
 	"github.com/jason-cairns/dbml-toolkit/model"
 	"github.com/jason-cairns/dbml-toolkit/preview"
@@ -24,6 +25,7 @@ Usage:
   dbml preview [flags] <file.dbml>    live browser preview with auto-refresh
   dbml lsp                            run the language server over stdio
   dbml parse   [flags] <entry.dbml>   parse and report the resolved model
+  dbml fmt     [flags] <file.dbml>    format DBML source canonically
 
 Run "dbml <command> -h" for command flags.`
 
@@ -45,6 +47,8 @@ func Run(args []string, version string) int {
 		return cmdLSP(args[1:])
 	case "parse":
 		return cmdParse(args[1:])
+	case "fmt":
+		return cmdFmt(args[1:])
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		return 0
@@ -150,6 +154,45 @@ func cmdParse(args []string) int {
 	if len(diags) > 0 {
 		return 1
 	}
+	return 0
+}
+
+func cmdFmt(args []string) int {
+	fs := flag.NewFlagSet("fmt", flag.ContinueOnError)
+	write := fs.Bool("w", false, "rewrite the file in place instead of printing to stdout")
+	pos, ok := parseArgs(fs, args)
+	if !ok {
+		return 2
+	}
+	if len(pos) == 0 {
+		fmt.Fprintln(os.Stderr, "fmt: missing <file.dbml>")
+		return 2
+	}
+	path := pos[0]
+	src, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fmt:", err)
+		return 1
+	}
+	out, diags := format.Format(path, string(src))
+	if len(diags) > 0 {
+		// Never rewrite a file that does not parse cleanly.
+		for _, d := range diags {
+			fmt.Fprintf(os.Stderr, "%s: %s\n", d.Pos, d.Msg)
+		}
+		return 1
+	}
+	if *write {
+		if out == string(src) {
+			return 0
+		}
+		if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "fmt:", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Print(out)
 	return 0
 }
 

@@ -11,11 +11,13 @@ import (
 
 // Lexer scans DBML source. Construct with New and pull tokens with Next.
 type Lexer struct {
-	file string
-	src  string
-	off  int
-	line int
-	col  int
+	file        string
+	src         string
+	off         int
+	line        int
+	col         int
+	comments    []token.Comment
+	lastTokLine int // source line of the last emitted token; 0 before the first
 }
 
 // New creates a Lexer for src attributed to file.
@@ -120,8 +122,14 @@ func (l *Lexer) punct(k token.Kind) token.Token {
 }
 
 func (l *Lexer) tok(k token.Kind, lit string, start token.Pos) token.Token {
-	return token.Token{Kind: k, Lit: lit, Pos: start, End: l.pos()}
+	end := l.pos()
+	l.lastTokLine = end.Line
+	return token.Token{Kind: k, Lit: lit, Pos: start, End: end}
 }
+
+// Comments returns the comments seen so far, in source order. It is meaningful
+// once the source has been fully scanned (e.g. after parsing).
+func (l *Lexer) Comments() []token.Comment { return l.comments }
 
 func (l *Lexer) skipTrivia() {
 	for l.off < len(l.src) {
@@ -130,23 +138,46 @@ func (l *Lexer) skipTrivia() {
 		case c == ' ' || c == '\t' || c == '\r' || c == '\n':
 			l.advance()
 		case c == '/' && l.peek2() == '/':
+			start := l.pos()
+			l.advance()
+			l.advance() // consume //
+			var b strings.Builder
 			for l.off < len(l.src) && l.peek() != '\n' {
-				l.advance()
+				b.WriteByte(l.advance())
 			}
+			l.addComment(b.String(), start, false)
 		case c == '/' && l.peek2() == '*':
+			start := l.pos()
 			l.advance()
 			l.advance()
+			var b strings.Builder
 			for l.off < len(l.src) && (l.peek() != '*' || l.peek2() != '/') {
-				l.advance()
+				b.WriteByte(l.advance())
 			}
 			if l.off < len(l.src) {
 				l.advance()
 				l.advance()
 			}
+			l.addComment(b.String(), start, true)
 		default:
 			return
 		}
 	}
+}
+
+// addComment records a comment as trivia. A comment is Trailing when a code
+// token was already emitted on its start line (an inline / end-of-line comment).
+func (l *Lexer) addComment(text string, start token.Pos, block bool) {
+	if !block {
+		text = strings.TrimRight(text, " \t")
+	}
+	l.comments = append(l.comments, token.Comment{
+		Text:     text,
+		Pos:      start,
+		End:      l.pos(),
+		Block:    block,
+		Trailing: start.Line == l.lastTokLine,
+	})
 }
 
 func (l *Lexer) scanSingle(start token.Pos) token.Token {

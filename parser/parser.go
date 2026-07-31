@@ -29,6 +29,10 @@ type parser struct {
 func Parse(path, src string) (*ast.File, []Diagnostic) {
 	p := &parser{lex: lexer.New(path, src), file: &ast.File{Path: path}}
 	p.parseFile()
+	// The lexer has now scanned to EOF, so every comment (including any trailing
+	// the final token) has been recorded. Carry them on the File so the formatter
+	// can splice them back by position.
+	p.file.Comments = p.lex.Comments()
 	return p.file, p.errs
 }
 
@@ -167,11 +171,14 @@ func (p *parser) parseProject() {
 			pr.Note = p.stringValue()
 		} else {
 			// database_type: 'x' and other key: value lines
-			p.name()
+			fld := ast.Setting{Pos: p.cur().Pos}
+			fld.Name, _ = p.name()
 			if p.cur().Kind == token.Colon {
 				p.next()
-				p.value()
+				fld.HasValue = true
+				fld.Value, fld.Kind = p.value()
 			}
+			pr.Fields = append(pr.Fields, fld)
 		}
 		p.forceProgress(since)
 	}
@@ -502,7 +509,7 @@ func (p *parser) parseTablePartial() {
 		case p.isKw("note") && p.peek(1).Kind == token.Colon:
 			p.next()
 			p.next()
-			p.stringValue()
+			tp.Note = p.stringValue()
 		default:
 			tp.Columns = append(tp.Columns, p.parseColumn("", tp.Name))
 		}
@@ -534,10 +541,13 @@ func (p *parser) parseRecords() {
 	// Group value tokens into rows by source line.
 	line := -1
 	var row []string
+	var kinds []token.Kind
 	flush := func() {
 		if len(row) > 0 {
 			rec.Rows = append(rec.Rows, row)
+			rec.Kinds = append(rec.Kinds, kinds)
 			row = nil
+			kinds = nil
 		}
 	}
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
@@ -551,6 +561,7 @@ func (p *parser) parseRecords() {
 		}
 		line = t.Pos.Line
 		row = append(row, t.Lit)
+		kinds = append(kinds, t.Kind)
 	}
 	flush()
 	p.expect(token.RBrace)
