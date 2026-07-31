@@ -27,9 +27,18 @@ type completionItem struct {
 	Label            string `json:"label"`
 	Kind             int    `json:"kind"`
 	Detail           string `json:"detail,omitempty"`
+	Documentation    any    `json:"documentation,omitempty"` // string or MarkupContent
 	InsertText       string `json:"insertText,omitempty"`
 	InsertTextFormat int    `json:"insertTextFormat,omitempty"` // 2 == snippet
 	SortText         string `json:"sortText,omitempty"`
+}
+
+// mdDoc wraps a note as LSP markdown documentation, or nil when there is none.
+func mdDoc(note string) any {
+	if note == "" {
+		return nil
+	}
+	return map[string]any{"kind": "markdown", "value": note}
 }
 
 // builtinTypes are the SQL/DBML column types offered in type position, on top
@@ -342,7 +351,12 @@ func enumCandidates(schema *model.Schema) []completionItem {
 		if e.Schema != "" {
 			name = e.Schema + "." + e.Name
 		}
-		out = append(out, completionItem{Label: name, Kind: ciEnum, Detail: "enum"})
+		var vals []string
+		for _, v := range e.Values {
+			vals = append(vals, v.Name)
+		}
+		out = append(out, completionItem{Label: name, Kind: ciEnum, Detail: "enum",
+			Documentation: mdDoc(strings.Join(vals, " · "))})
 	}
 	return out
 }
@@ -378,7 +392,7 @@ func tableCandidates(schema *model.Schema, _ *ast.File) []completionItem {
 			continue
 		}
 		seen[name] = true
-		out = append(out, completionItem{Label: name, Kind: ciClass, Detail: "table"})
+		out = append(out, completionItem{Label: name, Kind: ciClass, Detail: "table", Documentation: mdDoc(t.Note)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
 	return out
@@ -408,7 +422,11 @@ func columnsOfTable(schema *model.Schema, name string) []completionItem {
 	}
 	var out []completionItem
 	for _, c := range t.Columns {
-		out = append(out, completionItem{Label: c.Name, Kind: ciField, Detail: c.Type})
+		detail := c.Type
+		if flags := columnFlags(c); flags != "" {
+			detail += " · " + flags
+		}
+		out = append(out, completionItem{Label: c.Name, Kind: ciField, Detail: detail, Documentation: mdDoc(c.Note)})
 	}
 	return out
 }
