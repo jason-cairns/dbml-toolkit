@@ -14,22 +14,33 @@ func TestQualifiedGroupMemberNavigation(t *testing.T) {
 	s := &Server{docs: map[string]string{path: src}}
 	idx := s.index(pathToURI(path))
 
-	// Cursor on "serving_payload" within the group member (after "app.").
 	line := "  app.serving_payload"
-	col := strings.Index(line, "serving_payload") // 0-based char
-	occ := idx.at(path, position{Line: 4, Char: col})
-	if occ == nil {
-		t.Fatalf("no occurrence at the qualified group member name")
-	}
-	def, ok := idx.defs[occ.target]
-	if !ok {
-		t.Fatalf("group member %q has no definition", occ.target)
-	}
-	// The definition must anchor on the table name (col of "serving_payload" on
-	// line 0), not on the "app" schema prefix.
 	wantCol := strings.Index("Table app.serving_payload {", "serving_payload")
-	if def.Range.Start.Line != 0 || def.Range.Start.Char != wantCol {
-		t.Fatalf("definition should point at the table name (0,%d), got (%d,%d)",
-			wantCol, def.Range.Start.Line, def.Range.Start.Char)
+
+	// The whole `app.serving_payload` must be clickable: navigating from the
+	// schema part, the dot, or the table name all reach the table definition,
+	// which must anchor on the table name, not the schema prefix.
+	for _, sub := range []string{"app", "serving_payload"} {
+		col := strings.Index(line, sub)
+		occ := idx.at(path, position{Line: 4, Char: col})
+		if occ == nil {
+			t.Fatalf("no occurrence at %q in the qualified group member", sub)
+		}
+		def, ok := idx.defs[occ.target]
+		if !ok {
+			t.Fatalf("group member %q has no definition", occ.target)
+		}
+		if def.Range.Start.Line != 0 || def.Range.Start.Char != wantCol {
+			t.Fatalf("from %q: definition should point at the table name (0,%d), got (%d,%d)",
+				sub, wantCol, def.Range.Start.Line, def.Range.Start.Char)
+		}
+	}
+
+	// Rename must still touch only the table name on the member line, leaving
+	// the schema prefix intact.
+	occ := idx.at(path, position{Line: 4, Char: strings.Index(line, "app")})
+	nameCol := strings.Index(line, "serving_payload")
+	if occ.loc.Range.Start.Char != nameCol || occ.loc.Range.End.Char != nameCol+len("serving_payload") {
+		t.Fatalf("edit range should cover only the table name, got %+v", occ.loc.Range)
 	}
 }
