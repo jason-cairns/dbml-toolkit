@@ -116,6 +116,7 @@ func (s *Server) handle(m *message) {
 				"completionProvider":     map[string]any{"triggerCharacters": []string{".", "~"}},
 				"documentSymbolProvider": true,
 				"foldingRangeProvider":   true,
+				"renameProvider":         map[string]any{"prepareProvider": true},
 			},
 			"serverInfo": map[string]any{"name": "dbml-lsp"},
 		})
@@ -145,6 +146,10 @@ func (s *Server) handle(m *message) {
 		s.onDocumentSymbol(m)
 	case "textDocument/foldingRange":
 		s.onFoldingRange(m)
+	case "textDocument/prepareRename":
+		s.onPrepareRename(m)
+	case "textDocument/rename":
+		s.onRename(m)
 	case "textDocument/documentColor":
 		s.onDocumentColor(m)
 	case "textDocument/colorPresentation":
@@ -229,11 +234,7 @@ func (s *Server) onHover(m *message) {
 	json.Unmarshal(m.Params, &p)
 	idx := s.index(p.TextDocument.URI)
 	if o := idx.at(uriToPath(p.TextDocument.URI), p.Position); o != nil {
-		if t := idx.schema.Lookup(o.target); t != nil {
-			md := "**Table** `" + t.Qualified() + "`"
-			if t.Note != "" {
-				md += "\n\n" + t.Note
-			}
+		if md := hoverMarkdown(idx.schema, o.target); md != "" {
 			s.conn.reply(m.ID, map[string]any{
 				"contents": map[string]any{"kind": "markdown", "value": md},
 			})
@@ -241,6 +242,83 @@ func (s *Server) onHover(m *message) {
 		}
 	}
 	s.conn.reply(m.ID, nil)
+}
+
+// hoverMarkdown renders the hover card for an occurrence target, which is
+// either a table key or a "col:<qualified-table>.<column>" key.
+func hoverMarkdown(schema *model.Schema, target string) string {
+	if schema == nil {
+		return ""
+	}
+	if col, ok := strings.CutPrefix(target, "col:"); ok {
+		qtable, name, ok := strings.Cut(reverseLastDot(col), "\x00")
+		if !ok {
+			return ""
+		}
+		t := schema.Lookup(qtable)
+		if t == nil {
+			return ""
+		}
+		for _, c := range t.Columns {
+			if c.Name != name {
+				continue
+			}
+			md := "**Column** `" + c.Name + "`"
+			if c.Type != "" {
+				md += " `" + c.Type + "`"
+			}
+			if flags := columnFlags(c); flags != "" {
+				md += "\n\n" + flags
+			}
+			if c.Note != "" {
+				md += "\n\n" + c.Note
+			}
+			return md
+		}
+		return ""
+	}
+	if t := schema.Lookup(target); t != nil {
+		md := "**Table** `" + t.Qualified() + "`"
+		if t.Note != "" {
+			md += "\n\n" + t.Note
+		}
+		return md
+	}
+	return ""
+}
+
+// columnFlags summarises a column's constraint flags for hover.
+func columnFlags(c *model.Column) string {
+	var f []string
+	if c.PK {
+		f = append(f, "primary key")
+	}
+	if c.Unique {
+		f = append(f, "unique")
+	}
+	if c.NotNull {
+		f = append(f, "not null")
+	}
+	if c.Increment {
+		f = append(f, "increment")
+	}
+	if c.FK {
+		f = append(f, "foreign key")
+	}
+	if c.Default != "" {
+		f = append(f, "default: "+c.Default)
+	}
+	return strings.Join(f, ", ")
+}
+
+// reverseLastDot rewrites "schema.table.col" so the column can be split off with
+// a single strings.Cut: it returns "schema.table\x00col".
+func reverseLastDot(s string) string {
+	i := strings.LastIndex(s, ".")
+	if i < 0 {
+		return s
+	}
+	return s[:i] + "\x00" + s[i+1:]
 }
 
 // --- occurrence index -------------------------------------------------------
