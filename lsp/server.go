@@ -108,12 +108,13 @@ func (s *Server) handle(m *message) {
 	case "initialize":
 		s.conn.reply(m.ID, map[string]any{
 			"capabilities": map[string]any{
-				"textDocumentSync":   1, // full sync
-				"definitionProvider": true,
-				"referencesProvider": true,
-				"hoverProvider":      true,
-				"colorProvider":      true,
-				"completionProvider": map[string]any{"triggerCharacters": []string{".", "~"}},
+				"textDocumentSync":       1, // full sync
+				"definitionProvider":     true,
+				"referencesProvider":     true,
+				"hoverProvider":          true,
+				"colorProvider":          true,
+				"completionProvider":     map[string]any{"triggerCharacters": []string{".", "~"}},
+				"documentSymbolProvider": true,
 			},
 			"serverInfo": map[string]any{"name": "dbml-lsp"},
 		})
@@ -139,6 +140,8 @@ func (s *Server) handle(m *message) {
 		s.onHover(m)
 	case "textDocument/completion":
 		s.onCompletion(m)
+	case "textDocument/documentSymbol":
+		s.onDocumentSymbol(m)
 	case "textDocument/documentColor":
 		s.onDocumentColor(m)
 	case "textDocument/colorPresentation":
