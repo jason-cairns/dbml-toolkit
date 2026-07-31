@@ -190,13 +190,12 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 				if cst := constraintOf(c); cst != "" {
 					b.set(col+".constraint", cst)
 				}
-				if c.Note != "" {
-					b.set(col+".tooltip", c.Note)
-				}
 			}
 		}
-		if t.Note != "" {
-			b.set(id+".tooltip", t.Note)
+		// D2's sql_table rows can't carry their own tooltip, so fold the table's
+		// note and all of its column notes into the table's single hover tooltip.
+		if tip := tableTooltip(t); tip != "" {
+			b.set(id+".tooltip", tip)
 		}
 	}
 
@@ -308,6 +307,21 @@ func tableLabel(t *model.Table, opt diagram.Options) string {
 		return t.Schema + "." + t.Name
 	}
 	return t.Name
+}
+
+// tableTooltip combines a table's own note with a line per column note, since
+// D2 can only attach one tooltip to the whole sql_table shape.
+func tableTooltip(t *model.Table) string {
+	var lines []string
+	if t.Note != "" {
+		lines = append(lines, t.Note)
+	}
+	for _, c := range t.Columns {
+		if c.Note != "" {
+			lines = append(lines, c.Name+": "+c.Note)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // constraintOf maps a column's flags to a single D2 sql_table constraint,
