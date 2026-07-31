@@ -49,6 +49,21 @@ func (p *parser) next() token.Token {
 	return t
 }
 
+// forceProgress guarantees a block-body loop advances. Those loops consume a
+// variable number of tokens through helpers (name, expect, setting, dotted)
+// that report an error but do NOT consume the current token when it is
+// unexpected. If none of a loop's arms consume the token, the loop spins
+// forever, allocating on every turn — a half-typed buffer once drove the
+// language server into a 100%-CPU, multi-gigabyte loop and froze it. Every such
+// loop passes the token it began the iteration on; if the parser has not moved
+// past it, we skip one token so the loop is guaranteed to terminate. EOF is
+// left untouched: the loops all exit on it themselves.
+func (p *parser) forceProgress(since token.Token) {
+	if p.cur().Kind != token.EOF && p.cur().Pos.Off == since.Pos.Off {
+		p.next()
+	}
+}
+
 func (p *parser) accept(k token.Kind) (token.Token, bool) {
 	if p.cur().Kind == k {
 		return p.next(), true
@@ -145,6 +160,7 @@ func (p *parser) parseProject() {
 	pr.Settings = p.settings()
 	p.expect(token.LBrace)
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+		since := p.cur()
 		if p.isKw("note") {
 			p.next()
 			p.expect(token.Colon)
@@ -157,6 +173,7 @@ func (p *parser) parseProject() {
 				p.value()
 			}
 		}
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrace)
 	p.file.Projects = append(p.file.Projects, pr)
@@ -177,6 +194,7 @@ func (p *parser) parseTable() {
 	t.Note = settingNote(t.Settings)
 	p.expect(token.LBrace)
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+		since := p.cur()
 		switch {
 		case p.isKw("indexes"):
 			p.next()
@@ -195,6 +213,7 @@ func (p *parser) parseTable() {
 		default:
 			t.Columns = append(t.Columns, p.parseColumn(t.Schema, t.Name))
 		}
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrace)
 	p.file.Tables = append(p.file.Tables, t)
@@ -263,6 +282,7 @@ func (p *parser) parseIndexes() []*ast.Index {
 	var out []*ast.Index
 	p.expect(token.LBrace)
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+		since := p.cur()
 		idx := &ast.Index{Pos: p.cur().Pos}
 		if p.cur().Kind == token.LParen {
 			p.next()
@@ -278,6 +298,7 @@ func (p *parser) parseIndexes() []*ast.Index {
 		}
 		idx.Settings = p.settings()
 		out = append(out, idx)
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrace)
 	return out
@@ -296,6 +317,7 @@ func (p *parser) parseChecks() []ast.Check {
 	var out []ast.Check
 	p.expect(token.LBrace)
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+		since := p.cur()
 		ck := ast.Check{Pos: p.cur().Pos}
 		if p.cur().Kind == token.Expr {
 			ck.Expr = p.next().Lit
@@ -304,6 +326,7 @@ func (p *parser) parseChecks() []ast.Check {
 		}
 		ck.Settings = p.settings()
 		out = append(out, ck)
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrace)
 	return out
@@ -402,6 +425,7 @@ func (p *parser) parseEnum() {
 	setSchemaName(parts, &e.Schema, &e.Name)
 	p.expect(token.LBrace)
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+		since := p.cur()
 		v := ast.EnumValue{Pos: p.cur().Pos}
 		v.Name, _ = p.name()
 		for _, s := range p.settings() {
@@ -410,6 +434,7 @@ func (p *parser) parseEnum() {
 			}
 		}
 		e.Values = append(e.Values, v)
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrace)
 	p.file.Enums = append(p.file.Enums, e)
@@ -428,6 +453,7 @@ func (p *parser) parseTableGroup() {
 	g.Note = settingNote(g.Settings)
 	p.expect(token.LBrace)
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+		since := p.cur()
 		if p.isKw("note") && p.peek(1).Kind == token.Colon {
 			p.next()
 			p.next()
@@ -438,6 +464,7 @@ func (p *parser) parseTableGroup() {
 		parts, _ := p.dotted()
 		setSchemaName(parts, &m.Schema, &m.Table)
 		g.Members = append(g.Members, m)
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrace)
 	p.file.Groups = append(p.file.Groups, g)
@@ -467,6 +494,7 @@ func (p *parser) parseTablePartial() {
 	tp.Settings = p.settings()
 	p.expect(token.LBrace)
 	for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+		since := p.cur()
 		switch {
 		case p.isKw("indexes"):
 			p.next()
@@ -478,6 +506,7 @@ func (p *parser) parseTablePartial() {
 		default:
 			tp.Columns = append(tp.Columns, p.parseColumn("", tp.Name))
 		}
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrace)
 	p.file.Partials = append(p.file.Partials, tp)
@@ -539,6 +568,7 @@ func (p *parser) parseImport() {
 	} else if p.cur().Kind == token.LBrace {
 		p.next()
 		for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
+			since := p.cur()
 			it := ast.ImportItem{}
 			it.Type, _ = p.name()
 			it.Name, _ = p.name()
@@ -548,6 +578,7 @@ func (p *parser) parseImport() {
 			}
 			imp.Items = append(imp.Items, it)
 			acceptComma(p)
+			p.forceProgress(since)
 		}
 		p.expect(token.RBrace)
 	}
@@ -568,8 +599,10 @@ func (p *parser) settings() []ast.Setting {
 	p.next()
 	var out []ast.Setting
 	for p.cur().Kind != token.RBrack && p.cur().Kind != token.EOF {
+		since := p.cur()
 		out = append(out, p.setting())
 		acceptComma(p)
+		p.forceProgress(since)
 	}
 	p.expect(token.RBrack)
 	return out
