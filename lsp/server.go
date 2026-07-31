@@ -113,6 +113,7 @@ func (s *Server) handle(m *message) {
 				"referencesProvider": true,
 				"hoverProvider":      true,
 				"colorProvider":      true,
+				"completionProvider": map[string]any{"triggerCharacters": []string{".", "~"}},
 			},
 			"serverInfo": map[string]any{"name": "dbml-lsp"},
 		})
@@ -136,6 +137,8 @@ func (s *Server) handle(m *message) {
 		s.onReferences(m)
 	case "textDocument/hover":
 		s.onHover(m)
+	case "textDocument/completion":
+		s.onCompletion(m)
 	case "textDocument/documentColor":
 		s.onDocumentColor(m)
 	case "textDocument/colorPresentation":
