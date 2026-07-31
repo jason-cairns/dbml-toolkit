@@ -138,6 +138,13 @@ func (s *Server) handle(m *message) {
 				"documentSymbolProvider": true,
 				"foldingRangeProvider":   true,
 				"renameProvider":         map[string]any{"prepareProvider": true},
+				"semanticTokensProvider": map[string]any{
+					"legend": map[string]any{
+						"tokenTypes":     semTokenTypes,
+						"tokenModifiers": []string{},
+					},
+					"full": true,
+				},
 			},
 			"serverInfo": map[string]any{"name": "dbml-lsp"},
 		})
@@ -167,6 +174,8 @@ func (s *Server) handle(m *message) {
 		s.onDocumentSymbol(m)
 	case "textDocument/foldingRange":
 		s.onFoldingRange(m)
+	case "textDocument/semanticTokens/full":
+		s.onSemanticTokens(m)
 	case "textDocument/prepareRename":
 		s.onPrepareRename(m)
 	case "textDocument/rename":
