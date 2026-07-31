@@ -71,3 +71,69 @@ func contains(s, sub string) bool {
 		return false
 	})()
 }
+
+// A schema-qualified table named in an endpoint without a column (e.g. mid-edit
+// `> dim.date` before `.id` is typed) must resolve to that table rather than be
+// misread as table `dim` column `date`.
+func TestSchemaQualifiedEndpointDisambiguation(t *testing.T) {
+	dir := t.TempDir()
+	entry := write(t, dir, "s.dbml", `
+Table dim.date {
+  id int [pk]
+}
+Table fact.f {
+  d date [ref: > dim.date]
+  e date [ref: > dim.date.id]
+}
+`)
+	schema, diags, err := Load(entry)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for _, d := range diags {
+		if contains(d.Msg, "unknown table") {
+			t.Fatalf("dim.date should resolve, got diagnostic: %s", d.Msg)
+		}
+	}
+	// Both endpoints must point at the dim.date table.
+	for _, r := range schema.Refs {
+		if r.To.Table == nil || r.To.Table.Name != "date" || r.To.Table.Schema != "dim" {
+			t.Fatalf("endpoint did not resolve to dim.date: %+v", r.To)
+		}
+	}
+	// The column form keeps its column; the bare form has none.
+	var withCol, without int
+	for _, r := range schema.Refs {
+		if len(r.To.Columns) == 1 && r.To.Columns[0] == "id" {
+			withCol++
+		}
+		if len(r.To.Columns) == 0 {
+			without++
+		}
+	}
+	if withCol != 1 || without != 1 {
+		t.Fatalf("expected one endpoint with column id and one without, got with=%d without=%d", withCol, without)
+	}
+}
+
+// A genuinely missing table still reports an unknown-table diagnostic.
+func TestUnknownTableStillDiagnosed(t *testing.T) {
+	dir := t.TempDir()
+	entry := write(t, dir, "s.dbml", `
+Table users { id int [pk] }
+Ref: users.id > nope.id
+`)
+	_, diags, err := Load(entry)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	var found bool
+	for _, d := range diags {
+		if contains(d.Msg, "unknown table in relationship: nope") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an unknown-table diagnostic for nope, got %v", diags)
+	}
+}

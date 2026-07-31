@@ -99,6 +99,27 @@ func (s *Schema) Lookup(name string) *Table {
 	return nil
 }
 
+// TableFor resolves a dotted reference name (its parts already split on ".")
+// against the schema namespace. A dotted name is ambiguous — `dim.date` may be
+// table `dim` column `date`, or the two-part table `dim.date` with no column —
+// so instead of guessing positionally it prefers the longest leading run of
+// parts that actually names a table. It returns that table (nil if none match)
+// and the number of leading parts forming the table name; the remaining parts
+// are columns. When nothing matches it falls back to the positional convention
+// (all but the last part is the table), so an unresolved reference degrades to
+// the same guess the parser made.
+func (s *Schema) TableFor(parts []string) (*Table, int) {
+	for n := len(parts); n >= 1; n-- {
+		if t := s.Lookup(strings.Join(parts[:n], ".")); t != nil {
+			return t, n
+		}
+	}
+	if len(parts) > 1 {
+		return nil, len(parts) - 1
+	}
+	return nil, len(parts)
+}
+
 func settingVal(ss []ast.Setting, name string) (string, bool) {
 	for _, s := range ss {
 		if strings.EqualFold(s.Name, name) {
