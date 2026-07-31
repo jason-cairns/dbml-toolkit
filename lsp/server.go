@@ -5,12 +5,15 @@ package lsp
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jason-cairns/dbml-toolkit/ast"
 	"github.com/jason-cairns/dbml-toolkit/d2"
@@ -115,13 +118,61 @@ func Serve(r io.Reader, w io.Writer) error {
 			}
 			return err
 		}
-		s.handle(m)
+		s.dispatch(m, s.handle)
 		// A failed write means the client is gone; stop rather than block
 		// forever in the next read with a preview no one is driving.
 		if s.conn.werr != nil {
 			return s.conn.werr
 		}
 	}
+}
+
+// watchdogTimeout is how long a single handler may run before the watchdog logs
+// a goroutine dump. It is far longer than any healthy handler (a full resolve +
+// render is well under a second) but short enough to catch a hang while the
+// editor still cares.
+const watchdogTimeout = 5 * time.Second
+
+// logf writes a timestamped server log line to stderr. Editors surface an LSP's
+// stderr in their log (e.g. ~/.cache/helix/helix.log), so this is where panics
+// and slow handlers are recorded for post-mortem.
+func logf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "lsp %s "+format+"\n",
+		append([]any{time.Now().Format("15:04:05.000")}, args...)...)
+}
+
+// dispatch runs one message through handle, guarded so a single bad message can
+// never take the server down or strand the editor. The request loop is
+// single-threaded, so an unrecovered panic or an unbounded loop in any handler
+// is fatal to every future request — exactly the failure that once froze this
+// server. Two guards contain that:
+//   - a watchdog logs a full goroutine dump if a handler outruns
+//     watchdogTimeout, so a hang is diagnosable from the editor log instead of
+//     surfacing only as mysterious request timeouts. The timer fires on its own
+//     goroutine, so it still reports even while the handler goroutine spins.
+//   - a deferred recover turns a handler panic into a logged stack trace plus a
+//     null reply to any pending request, keeping the connection alive.
+func (s *Server) dispatch(m *message, handle func(*message)) {
+	watchdog := time.AfterFunc(watchdogTimeout, func() {
+		buf := make([]byte, 1<<20)
+		n := runtime.Stack(buf, true)
+		logf("handler for %q exceeded %s — possible hang; goroutine dump:\n%s",
+			m.Method, watchdogTimeout, buf[:n])
+	})
+	defer func() {
+		watchdog.Stop()
+		if r := recover(); r != nil {
+			buf := make([]byte, 1<<16)
+			n := runtime.Stack(buf, false)
+			logf("recovered panic in handler for %q: %v\n%s", m.Method, r, buf[:n])
+			// A request left without a reply hangs the client until it times
+			// out; answer with null so it fails fast and the session survives.
+			if len(m.ID) > 0 {
+				s.conn.reply(m.ID, nil)
+			}
+		}
+	}()
+	handle(m)
 }
 
 func (s *Server) handle(m *message) {

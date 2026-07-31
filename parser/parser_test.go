@@ -3,6 +3,7 @@ package parser
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jason-cairns/dbml-toolkit/ast"
 )
@@ -141,6 +142,41 @@ func TestErrorRecovery(t *testing.T) {
 	_, diags := Parse("bad.dbml", "Table t { id int } @@@ Table u { id int }")
 	if len(diags) == 0 {
 		t.Fatal("expected a diagnostic for the stray token")
+	}
+}
+
+// A half-typed buffer must never spin the parser. Every block-body loop advances
+// even when its arms consume no token; without that guarantee a stray token the
+// loop can't consume loops forever, allocating each turn — this once froze the
+// language server at 100% CPU and multiple gigabytes on a mid-edit document.
+// Each case below is a construct with a body holding a token none of the loop's
+// arms consume. Parse must return promptly (and flag the error) for every one.
+func TestNoInfiniteLoopOnMidEdit(t *testing.T) {
+	cases := map[string]string{
+		"table":        "Table t {\n  :\n}\n",
+		"table before": "Table t {\n  :\n}\nTable u { id int }\n",
+		"tablegroup":   "TableGroup g {\n  [\n}\n",
+		"tablepartial": "TablePartial p {\n  :\n}\n",
+		"enum":         "Enum e {\n  :\n}\n",
+		"indexes":      "Table t {\n  indexes {\n    [\n  }\n}\n",
+		"checks":       "Table t {\n  checks {\n    :\n  }\n}\n",
+		"project":      "Project p {\n  [\n}\n",
+		"settings":     "Table t {\n  id int [ : ]\n}\n",
+		"import items": "use { : } from './x'\n",
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			done := make(chan []Diagnostic, 1)
+			go func() { _, d := Parse("x.dbml", src); done <- d }()
+			select {
+			case d := <-done:
+				if len(d) == 0 {
+					t.Fatalf("expected a diagnostic for %q", src)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("Parse hung (infinite loop) on %q", src)
+			}
+		})
 	}
 }
 

@@ -79,6 +79,46 @@ func TestReadSkipsUnparseableFrame(t *testing.T) {
 	}
 }
 
+// A panicking handler must not crash the server: dispatch recovers it, and any
+// pending request still gets a reply so the client isn't left hanging. The
+// single-threaded request loop makes an unrecovered panic fatal to every future
+// request, so this guard is what keeps one bad message from killing the session.
+func TestDispatchRecoversPanic(t *testing.T) {
+	var buf bytes.Buffer
+	s := &Server{conn: newConn(strings.NewReader(""), &buf)}
+	m := &message{ID: json.RawMessage("7"), Method: "textDocument/hover"}
+
+	// Must not propagate the panic out of dispatch.
+	s.dispatch(m, func(*message) { panic("boom") })
+
+	// The pending request (id 7) must have received a reply.
+	_, body, _ := strings.Cut(buf.String(), "\r\n\r\n")
+	var reply map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &reply); err != nil {
+		t.Fatalf("no valid reply written after panic: %q (%v)", body, err)
+	}
+	if string(reply["id"]) != "7" {
+		t.Fatalf("reply should answer request id 7, got %s", reply["id"])
+	}
+	if _, ok := reply["result"]; !ok {
+		t.Fatalf("reply missing result field: %s", body)
+	}
+
+	// The server must still handle the next message normally.
+	s.dispatch(&message{Method: "textDocument/didChange"}, func(*message) {})
+}
+
+// A notification (no id) that panics is recovered without attempting a reply —
+// replying to a notification would be a protocol error.
+func TestDispatchRecoversNotificationPanic(t *testing.T) {
+	var buf bytes.Buffer
+	s := &Server{conn: newConn(strings.NewReader(""), &buf)}
+	s.dispatch(&message{Method: "textDocument/didChange"}, func(*message) { panic("boom") })
+	if buf.Len() != 0 {
+		t.Fatalf("no reply expected for a notification panic, wrote %q", buf.String())
+	}
+}
+
 func itoa(n int) string {
 	return strconv.Itoa(n)
 }
