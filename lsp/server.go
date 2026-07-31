@@ -182,7 +182,7 @@ func (s *Server) updatePreview(path string) {
 
 func (s *Server) publishDiagnostics(uri string) {
 	path := uriToPath(uri)
-	_, _, diags, _ := resolver.Graph(path, s.docs)
+	schema, files, diags, _ := resolver.Graph(path, s.docs)
 	out := []diagnostic{}
 	for _, d := range diags {
 		if d.Pos.File != path {
@@ -194,6 +194,7 @@ func (s *Server) publishDiagnostics(uri string) {
 			Message:  d.Msg,
 		})
 	}
+	out = append(out, s.lints(path, schema, files)...)
 	s.conn.notify("textDocument/publishDiagnostics", map[string]any{
 		"uri": uri, "diagnostics": out,
 	})
