@@ -434,7 +434,7 @@ func (s *Server) index(uri string) *index {
 	for p, f := range files {
 		addTable := func(e ast.Endpoint) {
 			if e.Table != "" {
-				ix.occs = append(ix.occs, mkOcc(p, e.Pos.Line, e.Pos.Col, len(e.Table), key(qual(e.Schema, e.Table))))
+				ix.occs = append(ix.occs, mkOcc(p, e.Pos.Line, tableCol(e.Pos.Col, e.Schema), len(e.Table), key(qual(e.Schema, e.Table))))
 			}
 		}
 		for _, t := range f.Tables {
@@ -463,11 +463,21 @@ func (s *Server) index(uri string) *index {
 		}
 		for _, g := range f.Groups {
 			for _, mem := range g.Members {
-				ix.occs = append(ix.occs, mkOcc(p, mem.Pos.Line, mem.Pos.Col, len(mem.Table), key(qual(mem.Schema, mem.Table))))
+				ix.occs = append(ix.occs, mkOcc(p, mem.Pos.Line, tableCol(mem.Pos.Col, mem.Schema), len(mem.Table), key(qual(mem.Schema, mem.Table))))
 			}
 		}
 	}
 	return ix
+}
+
+// tableCol shifts a dotted name's start column past its `schema.` prefix to the
+// table name itself, so the clickable occurrence covers the name the user
+// navigates to rather than the qualifying schema.
+func tableCol(startCol int, schema string) int {
+	if schema != "" {
+		return startCol + len(schema) + 1
+	}
+	return startCol
 }
 
 func mkOcc(file string, line, col, length int, target string) occurrence {

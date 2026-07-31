@@ -119,14 +119,17 @@ func (p *parser) parseFile() {
 	}
 }
 
-// dotted parses `a.b.c` returning the parts and the position of the first.
+// dotted parses `a.b.c` returning the parts and the position of the last one —
+// the entity's own name (the earlier parts are the qualifying schema), so
+// callers anchor NamePos on the name the user actually navigates to.
 func (p *parser) dotted() ([]string, token.Pos) {
 	first, pos := p.name()
 	parts := []string{first}
 	for p.cur().Kind == token.Dot {
 		p.next()
-		n, _ := p.name()
+		n, npos := p.name()
 		parts = append(parts, n)
+		pos = npos
 	}
 	return parts, pos
 }
