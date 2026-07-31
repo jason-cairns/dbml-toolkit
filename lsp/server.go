@@ -484,22 +484,39 @@ func (s *Server) index(uri string) *index {
 			ix.defs[colKey(t.Qualified(), c.Name)] = locFor(c.NamePos.File, c.NamePos.Line, c.NamePos.Col, len(c.Name))
 		}
 	}
-	// addCols records go-to-definition occurrences for the columns of an
-	// endpoint (e.g. the `id` in `users.id`) against the resolved table.
-	addCols := func(p string, e ast.Endpoint) {
-		qt := key(qual(e.Schema, e.Table))
+	// addEndpoint records navigation occurrences for a relationship endpoint. The
+	// dotted name is re-split against the namespace (model.TableFor) rather than
+	// trusting the parser's positional guess, so a schema-qualified table like
+	// `dim.date` navigates to the table even before its column is typed, and the
+	// trailing segment is only treated as a column when it really is one.
+	addEndpoint := func(p string, e ast.Endpoint) {
+		parts := model.EndpointParts(e)
+		if len(parts) == 0 {
+			return
+		}
+		t, tableParts := schema.TableFor(parts)
+		target := strings.Join(parts[:tableParts], ".")
+		if t != nil {
+			target = t.Qualified()
+		}
+		// Clickable table-reference span covering `schema.table`, editable over the
+		// table name only.
+		schemaPrefix := strings.Join(parts[:tableParts-1], ".")
+		tableName := parts[tableParts-1]
+		ix.occs = append(ix.occs, tableRefOcc(p, e.Pos.Line, e.Pos.Col, schemaPrefix, tableName, target))
+		// Column occurrences for the segments that remain columns after re-splitting.
+		// e.Columns line up with the tail of parts, so a segment the parser called a
+		// column but which was absorbed into the table name (tableParts moved past
+		// it) is skipped.
+		tableSegs := len(parts) - len(e.Columns)
 		for i, col := range e.Columns {
-			if i < len(e.ColPos) {
-				ix.occs = append(ix.occs, mkOcc(p, e.ColPos[i].Line, e.ColPos[i].Col, len(col), colKey(qt, col)))
+			if i >= len(e.ColPos) || tableSegs+i < tableParts {
+				continue
 			}
+			ix.occs = append(ix.occs, mkOcc(p, e.ColPos[i].Line, e.ColPos[i].Col, len(col), colKey(target, col)))
 		}
 	}
 	for p, f := range files {
-		addTable := func(e ast.Endpoint) {
-			if e.Table != "" {
-				ix.occs = append(ix.occs, tableRefOcc(p, e.Pos.Line, e.Pos.Col, e.Schema, e.Table, key(qual(e.Schema, e.Table))))
-			}
-		}
 		for _, t := range f.Tables {
 			qt := key(qual(t.Schema, t.Name))
 			ix.occs = append(ix.occs, mkOcc(p, t.NamePos.Line, t.NamePos.Col, len(t.Name), qt))
@@ -518,11 +535,9 @@ func (s *Server) index(uri string) *index {
 		}
 		for _, r := range f.Refs {
 			if !r.Inline {
-				addTable(r.Left)
-				addCols(p, r.Left)
+				addEndpoint(p, r.Left)
 			}
-			addTable(r.Right)
-			addCols(p, r.Right)
+			addEndpoint(p, r.Right)
 		}
 		for _, g := range f.Groups {
 			for _, mem := range g.Members {

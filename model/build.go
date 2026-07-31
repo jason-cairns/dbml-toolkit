@@ -1,6 +1,10 @@
 package model
 
-import "github.com/jason-cairns/dbml-toolkit/ast"
+import (
+	"strings"
+
+	"github.com/jason-cairns/dbml-toolkit/ast"
+)
 
 // Build assembles a resolved Schema from parsed files. aliases maps an
 // import alias to the qualified name it targets (for cross-file references).
@@ -116,16 +120,30 @@ func (s *Schema) buildRef(ar *ast.Ref) (*Ref, []Diagnostic) {
 }
 
 func (s *Schema) resolveEndpoint(e ast.Endpoint, diags *[]Diagnostic) Endpoint {
-	name := e.Table
-	if e.Schema != "" {
-		name = e.Schema + "." + e.Table
-	}
-	t := s.Lookup(name)
+	parts := EndpointParts(e)
+	t, tableParts := s.TableFor(parts)
+	columns := parts[tableParts:]
 	if t == nil {
 		*diags = append(*diags, Diagnostic{Pos: e.Pos, End: e.Pos,
-			Msg: "unknown table in relationship: " + name})
+			Msg: "unknown table in relationship: " + strings.Join(parts[:tableParts], ".")})
+		return Endpoint{Schema: e.Schema, Name: e.Table, Columns: columns, Pos: e.Pos}
 	}
-	return Endpoint{Table: t, Schema: e.Schema, Name: e.Table, Columns: e.Columns, Pos: e.Pos}
+	return Endpoint{Table: t, Schema: t.Schema, Name: t.Name, Columns: columns, Pos: e.Pos}
+}
+
+// EndpointParts reconstructs the full dotted segment list of an endpoint —
+// schema parts, then the table, then the columns — so it can be re-split against
+// the namespace. The parser split it positionally; TableFor may split it
+// differently once it knows which tables exist.
+func EndpointParts(e ast.Endpoint) []string {
+	var parts []string
+	if e.Schema != "" {
+		parts = append(parts, strings.Split(e.Schema, ".")...)
+	}
+	if e.Table != "" {
+		parts = append(parts, e.Table)
+	}
+	return append(parts, e.Columns...)
 }
 
 func markFK(e Endpoint, on bool) {

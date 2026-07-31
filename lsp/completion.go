@@ -184,11 +184,18 @@ func analyze(before []token.Token, curLine int) completionCtx {
 	}
 	ctx.inBrackets = depth > 0
 
-	// Trailing dot: `<ident>.` means the cursor is completing a member of ident.
+	// Trailing dot: `<a>.<b>.` means the cursor is completing a member of the
+	// dotted qualifier `a.b`. Walk back over the whole `ident (. ident)*` chain so
+	// schema-qualified tables resolve, not just the final segment.
 	if n := len(before); n > 0 && before[n-1].Kind == token.Dot {
-		if n > 1 && (before[n-2].Kind == token.Ident || before[n-2].Kind == token.QIdent) {
-			ctx.afterDot = before[n-2].Lit
+		var parts []string
+		for i := n - 2; i >= 0 && (before[i].Kind == token.Ident || before[i].Kind == token.QIdent); i -= 2 {
+			parts = append([]string{before[i].Lit}, parts...)
+			if i-1 < 0 || before[i-1].Kind != token.Dot {
+				break
+			}
 		}
+		ctx.afterDot = strings.Join(parts, ".")
 	}
 	// Trailing `name:` inside brackets means we're completing that setting's value.
 	if ctx.inBrackets {
@@ -248,7 +255,7 @@ func (c completionCtx) items(prefix string, file *ast.File, schema *model.Schema
 		return tableCandidates(schema, file)
 	case c.keyword == "Ref":
 		if c.afterDot != "" {
-			return columnsOfTable(schema, c.afterDot)
+			return endpointDotItems(schema, c.afterDot)
 		}
 		return tableCandidates(schema, file)
 	case c.keyword == "indexes":
@@ -286,7 +293,7 @@ func (c completionCtx) settingItems(prefix string, schema *model.Schema) []compl
 	// Inline ref endpoints inside a column's brackets.
 	if c.refExpects == "table" {
 		if c.afterDot != "" {
-			return columnsOfTable(schema, c.afterDot)
+			return endpointDotItems(schema, c.afterDot)
 		}
 		return tableCandidates(schema, nil)
 	}
@@ -410,6 +417,21 @@ func tablesInSchema(schema *model.Schema, sch string) []completionItem {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
 	return out
+}
+
+// endpointDotItems completes the member after a dotted qualifier in an endpoint
+// position. When the qualifier names a table it offers that table's columns
+// (e.g. `dim.date.` → its columns); otherwise the qualifier is a schema whose
+// table is still being typed, so it offers the tables in that schema (e.g.
+// `dim.` → the tables under `dim`).
+func endpointDotItems(schema *model.Schema, qualifier string) []completionItem {
+	if schema == nil {
+		return nil
+	}
+	if schema.Lookup(qualifier) != nil {
+		return columnsOfTable(schema, qualifier)
+	}
+	return tablesInSchema(schema, qualifier)
 }
 
 func columnsOfTable(schema *model.Schema, name string) []completionItem {
