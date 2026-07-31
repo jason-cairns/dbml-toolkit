@@ -164,19 +164,7 @@ func (e *emitter) table(t *ast.Table) {
 	// Align column types: pad every column name to the widest name so the type
 	// column lines up. Types themselves are not padded — settings follow after a
 	// single space.
-	width := 0
-	for _, c := range t.Columns {
-		if n := len(renderName(c.Name)); n > width {
-			width = n
-		}
-	}
-	for _, c := range t.Columns {
-		line := padRight(renderName(c.Name), width) + " " + renderType(c.Type)
-		if s := renderSettings(c.Settings, false); s != "" {
-			line += " " + s
-		}
-		e.emit(1, c.NamePos.Line, strings.TrimRight(line, " "))
-	}
+	e.columns(t.Columns)
 	for _, inj := range t.Injects {
 		e.emit(1, 0, "~"+renderName(inj))
 	}
@@ -189,6 +177,37 @@ func (e *emitter) table(t *ast.Table) {
 	e.emit(0, 0, "}")
 }
 
+// columns emits a table/partial's columns with aligned name, type and settings
+// columns. Names pad to the widest name so types line up; types pad to the
+// widest type *among columns that carry settings* so the `[settings]` brackets
+// line up too — without letting a long unbracketed type push the brackets out.
+func (e *emitter) columns(cols []*ast.Column) {
+	names := make([]string, len(cols))
+	types := make([]string, len(cols))
+	settings := make([]string, len(cols))
+	nameW, typeW := 0, 0
+	for i, c := range cols {
+		names[i] = renderName(c.Name)
+		types[i] = renderType(c.Type)
+		settings[i] = renderSettings(c.Settings, false)
+		if len(names[i]) > nameW {
+			nameW = len(names[i])
+		}
+		if settings[i] != "" && len(types[i]) > typeW {
+			typeW = len(types[i])
+		}
+	}
+	for i, c := range cols {
+		line := padRight(names[i], nameW) + " "
+		if settings[i] != "" {
+			line += padRight(types[i], typeW) + " " + settings[i]
+		} else {
+			line += types[i]
+		}
+		e.emit(1, c.NamePos.Line, strings.TrimRight(line, " "))
+	}
+}
+
 func (e *emitter) partial(tp *ast.TablePartial) {
 	hdr := "TablePartial " + renderName(tp.Name)
 	if s := renderSettings(tp.Settings, true); s != "" {
@@ -198,19 +217,7 @@ func (e *emitter) partial(tp *ast.TablePartial) {
 	if tp.Note != "" {
 		e.emit(1, 0, "Note: "+renderNoteText(tp.Note))
 	}
-	width := 0
-	for _, c := range tp.Columns {
-		if n := len(renderName(c.Name)); n > width {
-			width = n
-		}
-	}
-	for _, c := range tp.Columns {
-		line := padRight(renderName(c.Name), width) + " " + renderType(c.Type)
-		if s := renderSettings(c.Settings, false); s != "" {
-			line += " " + s
-		}
-		e.emit(1, c.NamePos.Line, strings.TrimRight(line, " "))
-	}
+	e.columns(tp.Columns)
 	if len(tp.Indexes) > 0 {
 		e.indexes(tp.Indexes)
 	}
