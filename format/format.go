@@ -293,7 +293,7 @@ func (e *emitter) ref(r *ast.Ref) {
 	if r.Name != "" {
 		hdr += " " + renderName(r.Name)
 	}
-	line := hdr + ": " + renderEndpoint(r.Left) + " " + r.Op + " " + renderEndpoint(r.Right)
+	line := hdr + ": " + renderEndpoint(r.Left) + " " + renderRefOp(r) + " " + renderEndpoint(r.Right)
 	if s := renderSettings(r.Settings, false); s != "" {
 		line += " " + s
 	}
@@ -379,9 +379,21 @@ func renderSettings(ss []ast.Setting, skipNote bool) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
+// renderRefOp renders a cardinality operator with its optional "?" markers.
+func renderRefOp(r *ast.Ref) string {
+	op := r.Op
+	if r.LeftOptional {
+		op = "?" + op
+	}
+	if r.RightOptional {
+		op += "?"
+	}
+	return op
+}
+
 func renderSetting(s ast.Setting) string {
 	if s.Ref != nil { // inline `ref: OP endpoint`
-		return "ref: " + s.Ref.Op + " " + renderEndpoint(s.Ref.Right)
+		return "ref: " + renderRefOp(s.Ref) + " " + renderEndpoint(s.Ref.Right)
 	}
 	if !s.HasValue {
 		return s.Name

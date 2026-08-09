@@ -180,6 +180,37 @@ func TestNoInfiniteLoopOnMidEdit(t *testing.T) {
 	}
 }
 
+func TestParseOptionalRefOperator(t *testing.T) {
+	src := `
+Table users { id int }
+Table posts {
+  id int
+  user_id int [ref: >? users.id]
+}
+Ref: posts.user_id ?> users.id
+Ref: posts.id ?<>? users.id
+`
+	f, diags := Parse("opt.dbml", src)
+	if len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+	if len(f.Refs) != 3 {
+		t.Fatalf("want 3 refs, got %d: %+v", len(f.Refs), f.Refs)
+	}
+	// inline `ref: >? users.id` — "?" on the referenced (right) side
+	if r := f.Refs[0]; r.Op != ">" || r.LeftOptional || !r.RightOptional {
+		t.Fatalf("inline >?: op=%q left=%v right=%v", r.Op, r.LeftOptional, r.RightOptional)
+	}
+	// standalone `?>` — "?" on the source (left) side
+	if r := f.Refs[1]; r.Op != ">" || !r.LeftOptional || r.RightOptional {
+		t.Fatalf("standalone ?>: op=%q left=%v right=%v", r.Op, r.LeftOptional, r.RightOptional)
+	}
+	// both sides optional around a many-to-many operator
+	if r := f.Refs[2]; r.Op != "<>" || !r.LeftOptional || !r.RightOptional {
+		t.Fatalf("?<>?: op=%q left=%v right=%v", r.Op, r.LeftOptional, r.RightOptional)
+	}
+}
+
 func settingVal2(ss []ast.Setting, name string) string {
 	for _, s := range ss {
 		if strings.EqualFold(s.Name, name) {

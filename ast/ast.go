@@ -102,14 +102,19 @@ type Check struct {
 }
 
 // Ref is a relationship. Cardinality Op is one of "<", ">", "-", "<>".
+// Either side of the operator may be marked optional with a "?" (e.g. ">?" or
+// "?>"), meaning that side's foreign-key column is nullable; LeftOptional and
+// RightOptional record which sides carried the marker.
 type Ref struct {
-	Name     string
-	Op       string
-	Left     Endpoint
-	Right    Endpoint
-	Settings []Setting
-	Inline   bool // true when derived from an inline column `ref:` setting
-	Pos      token.Pos
+	Name          string
+	Op            string
+	LeftOptional  bool // "?" on the left of the operator (source side optional)
+	RightOptional bool // "?" on the right of the operator (referenced side optional)
+	Left          Endpoint
+	Right         Endpoint
+	Settings      []Setting
+	Inline        bool // true when derived from an inline column `ref:` setting
+	Pos           token.Pos
 }
 
 // Endpoint is one side of a relationship: [schema.]table.(cols).

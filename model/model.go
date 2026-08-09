@@ -64,13 +64,15 @@ func (c *Column) IsKey() bool { return c.PK || c.Unique || c.FK }
 
 // Ref is a resolved relationship linked to its endpoint tables.
 type Ref struct {
-	Name     string
-	Op       string
-	From     Endpoint
-	To       Endpoint
-	OnDelete string
-	OnUpdate string
-	Pos      token.Pos
+	Name         string
+	Op           string
+	FromOptional bool // "?" on the From side: the From-side FK column is nullable
+	ToOptional   bool // "?" on the To side: the To-side FK column is nullable
+	From         Endpoint
+	To           Endpoint
+	OnDelete     string
+	OnUpdate     string
+	Pos          token.Pos
 }
 
 // Endpoint is one resolved side of a relationship.

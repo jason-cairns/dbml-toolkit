@@ -1,6 +1,7 @@
 package dot
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,6 +64,33 @@ func TestNotations(t *testing.T) {
 	label := Emit(schema, diagram.Options{Notation: diagram.Label})
 	if !strings.Contains(label, "taillabel=\"*\"") {
 		t.Fatalf("label notation missing cardinality label")
+	}
+}
+
+// The crow's-foot "o" (odot) marks a relationship side optional only when the
+// operator carries a `?`; a plain nullable FK column must not draw one.
+func TestCrowfootOptionalMarker(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "opt.dbml")
+	src := `
+Table users { id int [pk] }
+Table posts {
+  id int [pk]
+  author_id int [ref: > users.id]
+  editor_id int [ref: >? users.id]
+}
+`
+	if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	schema, diags, err := resolver.Load(p)
+	if err != nil || len(diags) != 0 {
+		t.Fatalf("load: %v %+v", err, diags)
+	}
+	out := Emit(schema, diagram.Options{Notation: diagram.Crowfoot})
+	// Exactly one edge is optional (the `>?` one), so exactly one odot glyph.
+	if n := strings.Count(out, "odot"); n != 1 {
+		t.Fatalf("want exactly 1 odot (only the `>?` edge), got %d:\n%s", n, out)
 	}
 }
 

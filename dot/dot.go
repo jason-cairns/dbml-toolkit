@@ -206,8 +206,8 @@ func (bd *builder) edge(r *model.Ref) {
 		return
 	}
 	fromMany, toMany := cardinality(r.Op)
-	fromOpt := endpointOptional(r.From)
-	toOpt := endpointOptional(r.To)
+	fromOpt := r.FromOptional
+	toOpt := r.ToOptional
 	if bd.opt.Notation == diagram.Crowfoot {
 		bd.printf("  %s -> %s [dir=both, arrowtail=%s, arrowhead=%s];\n",
 			from, to, crow(fromMany, fromOpt), crow(toMany, toOpt))
@@ -241,20 +241,6 @@ func cardinality(op string) (fromMany, toMany bool) {
 	default: // "-"
 		return false, false
 	}
-}
-
-func endpointOptional(e model.Endpoint) bool {
-	if e.Table == nil {
-		return false
-	}
-	for _, name := range e.Columns {
-		for _, c := range e.Table.Columns {
-			if c.Name == name && !c.NotNull && !c.PK {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // crow builds a crow's-foot arrowhead glyph.

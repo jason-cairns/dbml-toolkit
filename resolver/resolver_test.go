@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jason-cairns/dbml-toolkit/model"
 )
 
 func write(t *testing.T, dir, name, content string) string {
@@ -113,6 +115,50 @@ Table fact.f {
 	}
 	if withCol != 1 || without != 1 {
 		t.Fatalf("expected one endpoint with column id and one without, got with=%d without=%d", withCol, without)
+	}
+}
+
+// An optional (`?`) relationship side makes that side's column nullable.
+func TestOptionalRefClearsNotNull(t *testing.T) {
+	dir := t.TempDir()
+	entry := write(t, dir, "s.dbml", `
+Table users {
+  id int [pk]
+}
+Table posts {
+  id int [pk]
+  user_id int [not null, ref: ?> users.id]
+  editor_id int [not null, ref: > users.id]
+}
+`)
+	schema, diags, err := Load(entry)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics: %+v", diags)
+	}
+	col := func(table, name string) *model.Column {
+		for _, tb := range schema.Tables {
+			if tb.Name != table {
+				continue
+			}
+			for _, c := range tb.Columns {
+				if c.Name == name {
+					return c
+				}
+			}
+		}
+		t.Fatalf("column %s.%s not found", table, name)
+		return nil
+	}
+	// `?>` marks the source (user_id) optional: NotNull cleared despite the setting.
+	if c := col("posts", "user_id"); c.NotNull {
+		t.Fatalf("optional ref should clear NotNull on user_id")
+	}
+	// A plain `>` leaves an explicit `not null` intact.
+	if c := col("posts", "editor_id"); !c.NotNull {
+		t.Fatalf("non-optional ref should preserve NotNull on editor_id")
 	}
 }
 

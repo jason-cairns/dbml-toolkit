@@ -233,6 +233,8 @@ func inlineRefExpectation(lineToks []token.Token) string {
 		switch t.Kind {
 		case token.Lt, token.Gt, token.Minus, token.LtGt:
 			seenOp = true
+		case token.Question:
+			// optional-side marker ("?"), part of the operator; ignore
 		}
 	}
 	if !seenOp {

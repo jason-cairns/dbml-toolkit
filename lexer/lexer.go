@@ -90,6 +90,8 @@ func (l *Lexer) Next() token.Token {
 		return l.punct(token.Minus)
 	case c == '*':
 		return l.punct(token.Star)
+	case c == '?':
+		return l.punct(token.Question)
 	case c == '<':
 		if l.peek2() == '>' {
 			l.advance()

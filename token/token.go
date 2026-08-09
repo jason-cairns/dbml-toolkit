@@ -30,8 +30,9 @@ const (
 	Lt     // <
 	Gt     // >
 	Minus  // -
-	LtGt   // <>
-	Star   // *
+	LtGt     // <>
+	Star     // *
+	Question // ?
 )
 
 // Pos is a source position.
@@ -70,7 +71,7 @@ var names = map[Kind]string{
 	String: "STRING", QIdent: "QIDENT", BlockString: "BLOCKSTRING", Expr: "EXPR",
 	Color: "COLOR", LBrace: "{", RBrace: "}", LBrack: "[", RBrack: "]",
 	LParen: "(", RParen: ")", Comma: ",", Colon: ":", Dot: ".", Tilde: "~",
-	Lt: "<", Gt: ">", Minus: "-", LtGt: "<>", Star: "*",
+	Lt: "<", Gt: ">", Minus: "-", LtGt: "<>", Star: "*", Question: "?",
 }
 
 func (k Kind) String() string {

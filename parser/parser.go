@@ -366,28 +366,40 @@ func (p *parser) parseRef() {
 // refBody parses `endpoint OP endpoint`.
 func (p *parser) refBody(r *ast.Ref) {
 	r.Left = p.endpoint()
-	r.Op = p.refOp()
+	r.Op, r.LeftOptional, r.RightOptional = p.refOp()
 	r.Right = p.endpoint()
 }
 
-func (p *parser) refOp() string {
+// refOp parses a cardinality operator, optionally bracketed by "?" markers that
+// make the adjacent side optional (a nullable FK column), e.g. ">?", "?<", or
+// "?<>?". It returns the bare operator plus which sides were marked optional.
+func (p *parser) refOp() (op string, leftOpt, rightOpt bool) {
+	if p.cur().Kind == token.Question {
+		p.next()
+		leftOpt = true
+	}
 	switch p.cur().Kind {
 	case token.Lt:
 		p.next()
-		return "<"
+		op = "<"
 	case token.Gt:
 		p.next()
-		return ">"
+		op = ">"
 	case token.Minus:
 		p.next()
-		return "-"
+		op = "-"
 	case token.LtGt:
 		p.next()
-		return "<>"
+		op = "<>"
 	default:
 		p.errf(p.cur(), "expected relationship operator, got %q", p.cur().Lit)
-		return ""
+		return "", leftOpt, false
 	}
+	if p.cur().Kind == token.Question {
+		p.next()
+		rightOpt = true
+	}
+	return op, leftOpt, rightOpt
 }
 
 // endpoint parses [schema.]table.column or [schema.]table.(col, col).
@@ -638,7 +650,7 @@ func (p *parser) setting() ast.Setting {
 		s.HasValue = true
 		if strings.EqualFold(s.Name, "ref") {
 			r := &ast.Ref{Pos: s.Pos}
-			r.Op = p.refOp()
+			r.Op, r.LeftOptional, r.RightOptional = p.refOp()
 			r.Right = p.endpoint()
 			s.Ref = r
 			s.Value = r.Op

@@ -117,7 +117,7 @@ func semanticTokens(path, src string) []semTok {
 			emit(t, stNumber)
 		case token.Color:
 			emit(t, stNumber)
-		case token.Lt, token.Gt, token.Minus, token.LtGt:
+		case token.Lt, token.Gt, token.Minus, token.LtGt, token.Question:
 			emit(t, stOperator)
 		case token.Ident:
 			if brack == 0 && identOrd == 0 {

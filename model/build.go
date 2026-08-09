@@ -107,7 +107,7 @@ func buildColumn(ac *ast.Column) *Column {
 }
 
 func (s *Schema) buildRef(ar *ast.Ref) (*Ref, []Diagnostic) {
-	r := &Ref{Name: ar.Name, Op: ar.Op, Pos: ar.Pos}
+	r := &Ref{Name: ar.Name, Op: ar.Op, FromOptional: ar.LeftOptional, ToOptional: ar.RightOptional, Pos: ar.Pos}
 	r.OnDelete, _ = settingVal(ar.Settings, "delete")
 	r.OnUpdate, _ = settingVal(ar.Settings, "update")
 	var diags []Diagnostic
@@ -116,6 +116,13 @@ func (s *Schema) buildRef(ar *ast.Ref) (*Ref, []Diagnostic) {
 	// Mark foreign-key columns on the "many" side.
 	markFK(r.From, fkOnLeft(ar.Op))
 	markFK(r.To, fkOnRight(ar.Op))
+	// An optional side (`?`) makes that side's column nullable.
+	if r.FromOptional {
+		markNullable(r.From)
+	}
+	if r.ToOptional {
+		markNullable(r.To)
+	}
 	return r, diags
 }
 
@@ -154,6 +161,21 @@ func markFK(e Endpoint, on bool) {
 		for _, c := range e.Table.Columns {
 			if c.Name == col {
 				c.FK = true
+			}
+		}
+	}
+}
+
+// markNullable clears NotNull on an endpoint's columns; an optional (`?`)
+// relationship side means those columns may be null.
+func markNullable(e Endpoint) {
+	if e.Table == nil {
+		return
+	}
+	for _, col := range e.Columns {
+		for _, c := range e.Table.Columns {
+			if c.Name == col {
+				c.NotNull = false
 			}
 		}
 	}
