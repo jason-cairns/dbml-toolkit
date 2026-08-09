@@ -234,13 +234,25 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 	}
 
 	// Final pass on the edge objects (no more oracle edits after this): crow's-
-	// foot arrowheads and animation. The source arrowhead only renders when
-	// SrcArrow is set, so enable it explicitly (otherwise only one end shows).
-	for i, sp := range specs {
-		if i >= len(b.g.Edges) {
-			break
+	// foot arrowheads and animation. Oracle rebuilds can reorder edges by their
+	// container scope, so match metadata by oriented table endpoints instead of
+	// assuming edge creation order survived.
+	byEndpoints := map[string][]edgeSpec{}
+	for _, sp := range specs {
+		key := edgeEndpointKey(sp.srcTable, sp.dstTable)
+		byEndpoints[key] = append(byEndpoints[key], sp)
+	}
+	for _, e := range b.g.Edges {
+		key := edgeEndpointKey(e.Src.AbsID(), e.Dst.AbsID())
+		queue := byEndpoints[key]
+		if len(queue) == 0 {
+			continue
 		}
-		e := b.g.Edges[i]
+		sp := queue[0]
+		byEndpoints[key] = queue[1:]
+		// Oracle edits rebuild the graph from its AST, so derived SQL-row indices
+		// must be restored only after every create/set operation has completed.
+		fixSelfRefColumns(e, sp)
 		if opt.Notation == diagram.Label {
 			e.SrcArrowhead = arrowLabel(card(sp.srcMany, sp.srcOpt))
 			e.DstArrowhead = arrowLabel(card(sp.dstMany, sp.dstOpt))
@@ -262,12 +274,18 @@ func build(s *model.Schema, opt diagram.Options) (*d2graph.Graph, error) {
 func orient(ids map[*model.Table]string, r *model.Ref) (sp edgeSpec, src, dst string) {
 	from := endpointKey(ids, r.From)
 	to := endpointKey(ids, r.To)
+	fromTable := ids[r.From.Table]
+	toTable := ids[r.To.Table]
 	fromMany, toMany := cardinality(r.Op)
-	fromOpt, toOpt := optional(r.From), optional(r.To)
+	fromOpt, toOpt := r.FromOptional, r.ToOptional
 	if r.Op == "<" { // From is the one side, To is the many side — swap
-		return edgeSpec{toMany, fromMany, toOpt, fromOpt}, to, from
+		return edgeSpec{srcMany: toMany, dstMany: fromMany, srcOpt: toOpt, dstOpt: fromOpt,
+			srcColumn: singleColumn(r.To), dstColumn: singleColumn(r.From),
+			srcTable: toTable, dstTable: fromTable}, to, from
 	}
-	return edgeSpec{fromMany, toMany, fromOpt, toOpt}, from, to
+	return edgeSpec{srcMany: fromMany, dstMany: toMany, srcOpt: fromOpt, dstOpt: toOpt,
+		srcColumn: singleColumn(r.From), dstColumn: singleColumn(r.To),
+		srcTable: fromTable, dstTable: toTable}, from, to
 }
 
 // settingColor returns a TableGroup's color setting, if any.
@@ -288,7 +306,45 @@ func qual(schema, name string) string {
 	return schema + "." + name
 }
 
-type edgeSpec struct{ srcMany, dstMany, srcOpt, dstOpt bool }
+type edgeSpec struct {
+	srcMany, dstMany, srcOpt, dstOpt bool
+	srcColumn, dstColumn             string
+	srcTable, dstTable               string
+}
+
+func edgeEndpointKey(src, dst string) string { return src + "\x00" + dst }
+
+func singleColumn(e model.Endpoint) string {
+	if len(e.Columns) == 1 {
+		return e.Columns[0]
+	}
+	return ""
+}
+
+// D2 0.7.1 intentionally skips source-column detection when an edge's source
+// and destination are the same sql_table object. That makes a self-reference
+// leave the table boundary instead of the FK row. Restore both row indices so
+// ELK receives two explicit SQL-table ports.
+func fixSelfRefColumns(edge *d2graph.Edge, spec edgeSpec) {
+	if edge == nil || edge.Src != edge.Dst || edge.Src.SQLTable == nil {
+		return
+	}
+	edge.SrcTableColumnIndex = sqlColumnIndex(edge.Src, spec.srcColumn)
+	edge.DstTableColumnIndex = sqlColumnIndex(edge.Dst, spec.dstColumn)
+}
+
+func sqlColumnIndex(table *d2graph.Object, name string) *int {
+	if table == nil || table.SQLTable == nil || name == "" {
+		return nil
+	}
+	for i, column := range table.SQLTable.Columns {
+		if column.Name.Label == name {
+			index := i
+			return &index
+		}
+	}
+	return nil
+}
 
 func arrowShape(shape string) *d2graph.Attributes {
 	a := &d2graph.Attributes{}
@@ -363,20 +419,6 @@ func cardinality(op string) (fromMany, toMany bool) {
 	default: // "-"
 		return false, false
 	}
-}
-
-func optional(e model.Endpoint) bool {
-	if e.Table == nil {
-		return false
-	}
-	for _, name := range e.Columns {
-		for _, c := range e.Table.Columns {
-			if c.Name == name && !c.NotNull && !c.PK {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // crowfoot picks a D2 crow's-foot arrowhead: many vs one, optional (circle) vs
