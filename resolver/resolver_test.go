@@ -3,8 +3,10 @@ package resolver
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/jason-cairns/dbml-toolkit/ast"
 	"github.com/jason-cairns/dbml-toolkit/model"
 )
 
@@ -182,4 +184,142 @@ Ref: users.id > nope.id
 	if !found {
 		t.Fatalf("expected an unknown-table diagnostic for nope, got %v", diags)
 	}
+}
+
+func TestTablePartialExpansionPrecedenceAndInlineRefs(t *testing.T) {
+	dir := t.TempDir()
+	entry := write(t, dir, "s.dbml", `
+Table users { id int [pk] }
+
+TablePartial audit [headercolor: #aa0000] {
+  owner_id int [not null, ref: > users.id]
+  stamp timestamp
+  indexes {
+    stamp [unique]
+  }
+}
+
+TablePartial newer [headercolor: #0000aa] {
+  stamp bigint
+  indexes {
+    stamp [pk]
+  }
+}
+
+Table orders [headercolor: #00aa00] {
+  before int
+  ~audit
+  middle int
+  ~newer
+  owner_id int
+  after int
+  indexes {
+    stamp [name: 'local_stamp']
+  }
+}
+
+Table invoices {
+  ~audit
+}
+`)
+	schema, diags, err := Load(entry)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics: %+v", diags)
+	}
+
+	orders := schema.Lookup("orders")
+	if orders == nil {
+		t.Fatal("orders table not found")
+	}
+	if orders.HeaderColor != "#00aa00" {
+		t.Fatalf("local table setting should win, got %q", orders.HeaderColor)
+	}
+	var names []string
+	for _, c := range orders.Columns {
+		names = append(names, c.Name)
+	}
+	if got, want := strings.Join(names, ","), "before,middle,stamp,owner_id,after"; got != want {
+		t.Fatalf("expanded column order/precedence: got %q want %q", got, want)
+	}
+	if c := orders.Columns[2]; c.Type != "bigint" {
+		t.Fatalf("last partial should win stamp conflict, got %+v", c)
+	}
+	if len(orders.Indexes) != 1 || settingValue(orders.Indexes[0].Settings, "name") != "local_stamp" {
+		t.Fatalf("local index should win conflict: %+v", orders.Indexes)
+	}
+
+	invoices := schema.Lookup("invoices")
+	if invoices == nil || invoices.HeaderColor != "#aa0000" {
+		t.Fatalf("partial setting should apply to invoices: %+v", invoices)
+	}
+	if len(schema.Refs) != 1 {
+		t.Fatalf("only the non-overridden partial ref should expand, got %d: %+v", len(schema.Refs), schema.Refs)
+	}
+	r := schema.Refs[0]
+	if r.From.Table != invoices || r.From.Name != "invoices" || r.To.Table != schema.Lookup("users") {
+		t.Fatalf("partial inline ref was not rebound to invoices: %+v", r)
+	}
+	if len(r.From.Columns) != 1 || r.From.Columns[0] != "owner_id" {
+		t.Fatalf("partial inline ref source column: %+v", r.From)
+	}
+}
+
+func TestUnknownTablePartialDiagnosed(t *testing.T) {
+	dir := t.TempDir()
+	entry := write(t, dir, "s.dbml", "Table t {\n  ~missing\n}\n")
+	_, diags, err := Load(entry)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for _, d := range diags {
+		if contains(d.Msg, "unknown table partial: missing") {
+			return
+		}
+	}
+	t.Fatalf("expected unknown-partial diagnostic, got %+v", diags)
+}
+
+func TestImportedTablePartialAliasExpands(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "base.dbml", `
+Table users { id int [pk] }
+TablePartial audit {
+  owner_id int [ref: > users.id]
+}
+`)
+	entry := write(t, dir, "main.dbml", `
+use {
+  table users
+  tablepartial audit as auditable
+} from './base'
+Table invoices {
+  ~auditable
+}
+`)
+	schema, diags, err := Load(entry)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("diagnostics: %+v", diags)
+	}
+	invoices := schema.Lookup("invoices")
+	if invoices == nil || len(invoices.Columns) != 1 || invoices.Columns[0].Name != "owner_id" {
+		t.Fatalf("aliased partial did not expand: %+v", invoices)
+	}
+	if len(schema.Refs) != 1 || schema.Refs[0].From.Table != invoices || schema.Refs[0].To.Table != schema.Lookup("users") {
+		t.Fatalf("aliased partial ref did not resolve: %+v", schema.Refs)
+	}
+}
+
+func settingValue(settings []ast.Setting, name string) string {
+	for _, setting := range settings {
+		if strings.EqualFold(setting.Name, name) {
+			return setting.Value
+		}
+	}
+	return ""
 }

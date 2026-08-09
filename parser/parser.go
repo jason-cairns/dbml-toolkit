@@ -215,10 +215,11 @@ func (p *parser) parseTable() {
 			t.Note = p.stringValue()
 		case p.cur().Kind == token.Tilde:
 			p.next()
-			n, _ := p.name()
+			n, pos := p.name()
 			t.Injects = append(t.Injects, n)
+			t.InjectPos = append(t.InjectPos, pos)
 		default:
-			t.Columns = append(t.Columns, p.parseColumn(t.Schema, t.Name))
+			t.Columns = append(t.Columns, p.parseColumn(t.Schema, t.Name, true))
 		}
 		p.forceProgress(since)
 	}
@@ -226,7 +227,7 @@ func (p *parser) parseTable() {
 	p.file.Tables = append(p.file.Tables, t)
 }
 
-func (p *parser) parseColumn(schema, table string) *ast.Column {
+func (p *parser) parseColumn(schema, table string, promoteRefs bool) *ast.Column {
 	name, npos := p.name()
 	c := &ast.Column{Name: name, Pos: npos, NamePos: npos}
 	c.Type = p.parseType()
@@ -234,6 +235,9 @@ func (p *parser) parseColumn(schema, table string) *ast.Column {
 	c.Note = settingNote(c.Settings)
 	// Promote any inline `ref:` setting into a first-class relationship.
 	for _, s := range c.Settings {
+		if !promoteRefs {
+			continue
+		}
 		if strings.EqualFold(s.Name, "ref") && s.Ref != nil {
 			r := s.Ref
 			r.Inline = true
@@ -523,7 +527,10 @@ func (p *parser) parseTablePartial() {
 			p.next()
 			tp.Note = p.stringValue()
 		default:
-			tp.Columns = append(tp.Columns, p.parseColumn("", tp.Name))
+			// A partial is a reusable column template, not a concrete table.
+			// Inline refs need a concrete owner, so do not emit a relationship
+			// from the partial name itself.
+			tp.Columns = append(tp.Columns, p.parseColumn("", tp.Name, false))
 		}
 		p.forceProgress(since)
 	}

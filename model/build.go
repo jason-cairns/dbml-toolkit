@@ -1,9 +1,11 @@
 package model
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/jason-cairns/dbml-toolkit/ast"
+	"github.com/jason-cairns/dbml-toolkit/token"
 )
 
 // Build assembles a resolved Schema from parsed files. aliases maps an
@@ -11,11 +13,17 @@ import (
 func Build(files []*ast.File, aliases map[string]string) (*Schema, []Diagnostic) {
 	s := &Schema{byKey: map[string]*Table{}}
 	var diags []Diagnostic
+	var pendingRefs []*ast.Ref
 
 	partials := map[string]*ast.TablePartial{}
 	for _, f := range files {
 		for _, tp := range f.Partials {
 			partials[tp.Name] = tp
+		}
+	}
+	for alias, target := range aliases {
+		if tp := partials[target]; tp != nil {
+			partials[alias] = tp
 		}
 	}
 
@@ -27,9 +35,11 @@ func Build(files []*ast.File, aliases map[string]string) (*Schema, []Diagnostic)
 		s.Groups = append(s.Groups, f.Groups...)
 		s.Notes = append(s.Notes, f.Notes...)
 		for _, at := range f.Tables {
-			t := buildTable(at, partials, s)
+			t, refs, tdiags := buildTable(at, partials)
 			s.Tables = append(s.Tables, t)
 			s.index(t)
+			pendingRefs = append(pendingRefs, refs...)
+			diags = append(diags, tdiags...)
 		}
 	}
 	for alias, target := range aliases {
@@ -44,6 +54,11 @@ func Build(files []*ast.File, aliases map[string]string) (*Schema, []Diagnostic)
 			s.Refs = append(s.Refs, r)
 			diags = append(diags, d...)
 		}
+	}
+	for _, ar := range pendingRefs {
+		r, d := s.buildRef(ar)
+		s.Refs = append(s.Refs, r)
+		diags = append(diags, d...)
 	}
 	return s, diags
 }
@@ -62,36 +77,172 @@ func (s *Schema) index(t *Table) {
 	}
 }
 
-func buildTable(at *ast.Table, partials map[string]*ast.TablePartial, _ *Schema) *Table {
+func buildTable(at *ast.Table, partials map[string]*ast.TablePartial) (*Table, []*ast.Ref, []Diagnostic) {
 	t := &Table{
 		Schema: at.Schema, Name: at.Name, Alias: at.Alias,
-		Indexes: at.Indexes, Note: at.Note, NamePos: at.NamePos,
+		NamePos: at.NamePos,
 	}
-	if c, ok := settingVal(at.Settings, "headercolor"); ok {
+
+	// Table settings follow DBML's precedence rules: later partials override
+	// earlier partials, and the local table definition overrides every partial.
+	var settings []ast.Setting
+	for _, name := range at.Injects {
+		if tp := partials[name]; tp != nil {
+			settings = mergeSettings(settings, tp.Settings)
+			if tp.Note != "" {
+				t.Note = tp.Note
+			}
+		}
+	}
+	settings = mergeSettings(settings, at.Settings)
+	if at.Note != "" {
+		t.Note = at.Note
+	}
+	if c, ok := settingVal(settings, "headercolor"); ok {
 		t.HeaderColor = c
 	}
-	// Injected partials first, then local columns (local overrides by name).
-	seen := map[string]int{}
-	add := func(col *Column) {
-		if i, ok := seen[col.Name]; ok {
-			t.Columns[i] = col
-			return
-		}
-		seen[col.Name] = len(t.Columns)
-		t.Columns = append(t.Columns, col)
+	if n, ok := settingVal(settings, "note"); ok && at.Note == "" {
+		t.Note = n
 	}
-	for _, name := range at.Injects {
-		if tp, ok := partials[name]; ok {
-			for _, ac := range tp.Columns {
-				add(buildColumn(ac))
-			}
-			t.Indexes = append(t.Indexes, tp.Indexes...)
+
+	type bodyEvent struct {
+		pos      token.Pos
+		partial  *ast.TablePartial
+		column   *ast.Column
+		injectID int
+	}
+	var events []bodyEvent
+	var diags []Diagnostic
+	for i, name := range at.Injects {
+		pos := at.Pos
+		if i < len(at.InjectPos) {
+			pos = at.InjectPos[i]
 		}
+		tp := partials[name]
+		if tp == nil {
+			diags = append(diags, Diagnostic{Pos: pos, End: pos, Msg: "unknown table partial: " + name})
+			continue
+		}
+		events = append(events, bodyEvent{pos: pos, partial: tp, injectID: i})
 	}
 	for _, ac := range at.Columns {
-		add(buildColumn(ac))
+		events = append(events, bodyEvent{pos: ac.NamePos, column: ac})
 	}
-	return t
+	sort.SliceStable(events, func(i, j int) bool { return events[i].pos.Off < events[j].pos.Off })
+
+	type columnCandidate struct {
+		column *ast.Column
+		local  bool
+	}
+	var candidates []columnCandidate
+	for _, event := range events {
+		if event.column != nil {
+			candidates = append(candidates, columnCandidate{column: event.column, local: true})
+			continue
+		}
+		for _, ac := range event.partial.Columns {
+			candidates = append(candidates, columnCandidate{column: ac})
+		}
+	}
+
+	// Pick winners independently from output order: local fields always win;
+	// otherwise the last injected partial wins. The winning definition remains
+	// at its source/injection position in the expanded table.
+	localNames := map[string]bool{}
+	for _, c := range candidates {
+		if c.local {
+			localNames[c.column.Name] = true
+		}
+	}
+	winner := map[string]int{}
+	for i, c := range candidates {
+		if c.local || !localNames[c.column.Name] {
+			winner[c.column.Name] = i
+		}
+	}
+	var refs []*ast.Ref
+	for i, c := range candidates {
+		if winner[c.column.Name] != i {
+			continue
+		}
+		t.Columns = append(t.Columns, buildColumn(c.column))
+		if !c.local {
+			refs = append(refs, inlineRefsFor(t, c.column)...)
+		}
+	}
+
+	// Indexes use the same precedence: later partial, then local. Equal field
+	// lists identify the same index regardless of settings.
+	var indexes []*ast.Index
+	for _, name := range at.Injects {
+		if tp := partials[name]; tp != nil {
+			indexes = mergeIndexes(indexes, tp.Indexes)
+		}
+	}
+	t.Indexes = mergeIndexes(indexes, at.Indexes)
+	return t, refs, diags
+}
+
+func inlineRefsFor(t *Table, c *ast.Column) []*ast.Ref {
+	var refs []*ast.Ref
+	for _, setting := range c.Settings {
+		if !strings.EqualFold(setting.Name, "ref") || setting.Ref == nil {
+			continue
+		}
+		r := *setting.Ref
+		r.Inline = true
+		r.Left = ast.Endpoint{Schema: t.Schema, Table: t.Name, Columns: []string{c.Name}, Pos: c.NamePos}
+		refs = append(refs, &r)
+	}
+	return refs
+}
+
+func mergeSettings(base, override []ast.Setting) []ast.Setting {
+	out := append([]ast.Setting(nil), base...)
+	positions := map[string]int{}
+	for i, setting := range out {
+		positions[strings.ToLower(setting.Name)] = i
+	}
+	for _, setting := range override {
+		key := strings.ToLower(setting.Name)
+		if i, ok := positions[key]; ok {
+			out[i] = setting
+		} else {
+			positions[key] = len(out)
+			out = append(out, setting)
+		}
+	}
+	return out
+}
+
+func mergeIndexes(base, override []*ast.Index) []*ast.Index {
+	out := append([]*ast.Index(nil), base...)
+	positions := map[string]int{}
+	for i, index := range out {
+		positions[indexKey(index)] = i
+	}
+	for _, index := range override {
+		key := indexKey(index)
+		if i, ok := positions[key]; ok {
+			out[i] = index
+		} else {
+			positions[key] = len(out)
+			out = append(out, index)
+		}
+	}
+	return out
+}
+
+func indexKey(index *ast.Index) string {
+	parts := make([]string, len(index.Fields))
+	for i, field := range index.Fields {
+		if field.Expr {
+			parts[i] = "`" + field.Text + "`"
+		} else {
+			parts[i] = field.Text
+		}
+	}
+	return strings.Join(parts, "\x00")
 }
 
 func buildColumn(ac *ast.Column) *Column {

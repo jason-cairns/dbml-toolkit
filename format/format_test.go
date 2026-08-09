@@ -81,6 +81,18 @@ func TestFormatIdempotent(t *testing.T) {
 	}
 }
 
+func TestFormatPreservesTablePartialInjectionOrder(t *testing.T) {
+	in := "Table t {\n  before int\n  ~first\n  middle int\n  ~second\n  after int\n}\n"
+	want := "Table t {\n  before int\n  ~first\n  middle int\n  ~second\n  after  int\n}\n"
+	got := fmtOK(t, in)
+	if got != want {
+		t.Errorf("partial injection order changed\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if again := fmtOK(t, got); again != got {
+		t.Errorf("partial injection formatting not idempotent\n--- got ---\n%s\n--- again ---\n%s", got, again)
+	}
+}
+
 func TestFormatPreservesComments(t *testing.T) {
 	in := "// header\nTable users {\n  id int [pk] // the id\n  // about email\n  email varchar\n}\n"
 	want := "// header\nTable users {\n  id    int [pk]  // the id\n  // about email\n  email varchar\n}\n"

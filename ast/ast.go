@@ -57,17 +57,18 @@ type Project struct {
 
 // Table is a table definition.
 type Table struct {
-	Schema   string
-	Name     string
-	Alias    string
-	Settings []Setting
-	Columns  []*Column
-	Indexes  []*Index
-	Checks   []Check
-	Note     string
-	Injects  []string // ~partial names injected into this table
-	Pos      token.Pos
-	NamePos  token.Pos
+	Schema    string
+	Name      string
+	Alias     string
+	Settings  []Setting
+	Columns   []*Column
+	Indexes   []*Index
+	Checks    []Check
+	Note      string
+	Injects   []string    // ~partial names injected into this table
+	InjectPos []token.Pos // source position of each injection (parallel to Injects)
+	Pos       token.Pos
+	NamePos   token.Pos
 }
 
 // Column is a single table column.

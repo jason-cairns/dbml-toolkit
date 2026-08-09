@@ -161,12 +161,27 @@ func (e *emitter) table(t *ast.Table) {
 		e.emit(1, 0, "Note: "+renderNoteText(t.Note))
 	}
 
-	// Align column types: pad every column name to the widest name so the type
-	// column lines up. Types themselves are not padded — settings follow after a
-	// single space.
-	e.columns(t.Columns)
-	for _, inj := range t.Injects {
-		e.emit(1, 0, "~"+renderName(inj))
+	// Columns and partial injections are semantically ordered table-body items:
+	// moving every injection after the columns can change conflict winners and
+	// expanded column order. Render them in their original source order.
+	type bodyLine struct {
+		pos  token.Pos
+		text string
+	}
+	var body []bodyLine
+	for i, line := range columnLines(t.Columns) {
+		body = append(body, bodyLine{pos: t.Columns[i].NamePos, text: line})
+	}
+	for i, inj := range t.Injects {
+		pos := t.Pos
+		if i < len(t.InjectPos) {
+			pos = t.InjectPos[i]
+		}
+		body = append(body, bodyLine{pos: pos, text: "~" + renderName(inj)})
+	}
+	sort.SliceStable(body, func(i, j int) bool { return body[i].pos.Off < body[j].pos.Off })
+	for _, line := range body {
+		e.emit(1, line.pos.Line, line.text)
 	}
 	if len(t.Indexes) > 0 {
 		e.indexes(t.Indexes)
@@ -182,11 +197,19 @@ func (e *emitter) table(t *ast.Table) {
 // widest type *among columns that carry settings* so the `[settings]` brackets
 // line up too — without letting a long unbracketed type push the brackets out.
 func (e *emitter) columns(cols []*ast.Column) {
+	for i, line := range columnLines(cols) {
+		e.emit(1, cols[i].NamePos.Line, line)
+	}
+}
+
+func columnLines(cols []*ast.Column) []string {
 	names := make([]string, len(cols))
 	types := make([]string, len(cols))
 	settings := make([]string, len(cols))
+	lines := make([]string, len(cols))
 	nameW, typeW := 0, 0
-	for i, c := range cols {
+	for i := range cols {
+		c := cols[i]
 		names[i] = renderName(c.Name)
 		types[i] = renderType(c.Type)
 		settings[i] = renderSettings(c.Settings, false)
@@ -197,15 +220,16 @@ func (e *emitter) columns(cols []*ast.Column) {
 			typeW = len(types[i])
 		}
 	}
-	for i, c := range cols {
+	for i := range cols {
 		line := padRight(names[i], nameW) + " "
 		if settings[i] != "" {
 			line += padRight(types[i], typeW) + " " + settings[i]
 		} else {
 			line += types[i]
 		}
-		e.emit(1, c.NamePos.Line, strings.TrimRight(line, " "))
+		lines[i] = strings.TrimRight(line, " ")
 	}
+	return lines
 }
 
 func (e *emitter) partial(tp *ast.TablePartial) {
