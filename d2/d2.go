@@ -359,10 +359,14 @@ func arrowLabel(label string) *d2graph.Attributes {
 }
 
 func tableLabel(t *model.Table, opt diagram.Options) string {
-	if !opt.NoSchema && t.Schema != "" && t.Schema != "public" {
-		return t.Schema + "." + t.Name
+	name := t.Name
+	if t.External {
+		name += " (external)"
 	}
-	return t.Name
+	if !opt.NoSchema && t.Schema != "" && t.Schema != "public" {
+		return t.Schema + "." + name
+	}
+	return name
 }
 
 // tableTooltip combines a table's own note with a line per column note, since

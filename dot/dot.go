@@ -109,6 +109,9 @@ func (bd *builder) table(t *model.Table) {
 		fmt.Fprintf(&head, `<font color="#cbd5e1" point-size="9">%s</font><br/>`, esc(t.Schema))
 	}
 	fmt.Fprintf(&head, "<b>%s</b>", esc(t.Name))
+	if t.External {
+		head.WriteString(` <font point-size="9">(external)</font>`)
+	}
 	if t.Alias != "" {
 		fmt.Fprintf(&head, ` <font point-size="9">(%s)</font>`, esc(t.Alias))
 	}

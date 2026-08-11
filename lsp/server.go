@@ -87,16 +87,27 @@ type renderJob struct {
 //   - "0"/"off"/"false": no preview
 //   - "manual"/"noopen": serve the preview but do not open a browser
 //   - anything else (default): serve and auto-open the browser
+//
+// DBML_PREVIEW_CONTEXT controls imported-table visibility in that preview:
+// "all", "refs" (the default), or "none".
 func Serve(r io.Reader, w io.Writer) error {
 	s := &Server{conn: newConn(r, w), docs: map[string]string{}, previewOpen: true}
+	previewContext := resolver.ContextRefs
+	if value := os.Getenv("DBML_PREVIEW_CONTEXT"); value != "" {
+		if parsed, ok := resolver.ParseContext(value); ok {
+			previewContext = parsed
+		} else {
+			logf("ignoring invalid DBML_PREVIEW_CONTEXT %q (want all|refs|none)", value)
+		}
+	}
 	switch strings.ToLower(os.Getenv("DBML_PREVIEW")) {
 	case "0", "off", "false":
 		// preview disabled
 	case "manual", "noopen":
-		s.preview = preview.New(d2.New(), diagram.Options{})
+		s.preview = preview.NewContext(d2.New(), diagram.Options{}, previewContext)
 		s.previewOpen = false
 	default:
-		s.preview = preview.New(d2.New(), diagram.Options{})
+		s.preview = preview.NewContext(d2.New(), diagram.Options{}, previewContext)
 	}
 	// Tie the preview's lifetime to the editor connection: when the stream
 	// closes (or the client stops reading and our writes start failing), tear

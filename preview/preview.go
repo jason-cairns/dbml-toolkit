@@ -22,8 +22,9 @@ import (
 // Server is a live-preview HTTP server. Create with New, bind with Listen, and
 // push new content with Render.
 type Server struct {
-	engine diagram.Engine
-	opt    diagram.Options
+	engine  diagram.Engine
+	opt     diagram.Options
+	context resolver.Context
 
 	mu      sync.RWMutex
 	svg     []byte
@@ -38,7 +39,12 @@ type Server struct {
 
 // New creates a preview server that renders with the given engine and options.
 func New(engine diagram.Engine, opt diagram.Options) *Server {
-	return &Server{engine: engine, opt: opt, clients: map[chan struct{}]struct{}{}}
+	return NewContext(engine, opt, resolver.ContextAll)
+}
+
+// NewContext creates a preview server with an explicit import-context view.
+func NewContext(engine diagram.Engine, opt diagram.Options, context resolver.Context) *Server {
+	return &Server{engine: engine, opt: opt, context: context, clients: map[chan struct{}]struct{}{}}
 }
 
 // Listen binds a port (0 picks a free one), serves in the background and, if
@@ -107,7 +113,7 @@ func (s *Server) renderResult(entry string, overlay map[string]string) (svg []by
 			svg, errMsg = nil, fmt.Sprintf("preview render panicked: %v", r)
 		}
 	}()
-	schema, diags, err := resolver.LoadSource(entry, overlay)
+	schema, diags, err := resolver.LoadContext(entry, overlay, s.context)
 	msg := ""
 	for _, d := range diags {
 		msg += d.Pos.String() + ": " + d.Msg + "\n"
@@ -122,11 +128,15 @@ func (s *Server) renderResult(entry string, overlay map[string]string) (svg []by
 	return out, msg
 }
 
-// Serve is the standalone `dbml preview` entry point: it renders entry from
-// disk, opens a browser, then blocks, re-rendering whenever the file or one of
-// its imports changes on disk.
+// Serve is the standalone `dbml preview` entry point using full import context.
 func Serve(entry string, port int, open bool, engine diagram.Engine, opt diagram.Options) error {
-	s := New(engine, opt)
+	return ServeContext(entry, port, open, engine, opt, resolver.ContextAll)
+}
+
+// ServeContext renders entry with an explicit import-context view, opens a
+// browser, then blocks and re-renders whenever the module graph changes.
+func ServeContext(entry string, port int, open bool, engine diagram.Engine, opt diagram.Options, context resolver.Context) error {
+	s := NewContext(engine, opt, context)
 	addr, err := s.Listen(port, open)
 	if err != nil {
 		return err

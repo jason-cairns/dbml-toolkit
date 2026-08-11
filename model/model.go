@@ -39,6 +39,7 @@ type Table struct {
 	Indexes     []*ast.Index
 	Note        string
 	HeaderColor string
+	External    bool // compact context table imported with `use`
 	NamePos     token.Pos
 }
 

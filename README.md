@@ -16,6 +16,7 @@ go install github.com/jason-cairns/dbml-toolkit/cmd/dbml@latest
 dbml render schema.dbml -o schema.svg          # D2 (ELK) SVG, the default
 dbml render --format ascii schema.dbml         # ASCII ER diagram
 dbml render --engine graphviz schema.dbml      # Graphviz fallback
+dbml render --context refs module.dbml          # compact imported context
 dbml preview schema.dbml                       # live browser preview, auto-refresh
 dbml fmt schema.dbml                           # print canonical formatting to stdout
 dbml fmt -w schema.dbml                        # format the file in place
@@ -29,6 +30,10 @@ document" / format-on-save in any LSP editor reformats DBML canonically
 - `--engine`: `d2` (default) or `graphviz`.
 - `--format`: `svg` (default) / `ascii` / `d2` (d2 source) for the D2 engine; `svg` / `dot` for Graphviz.
 - `--detail`: `full` (default) / `keys` / `tables`. `--notation`: `crowfoot` (default) / `label`. `--no-schema`.
+- `--context`: `all` (default) / `refs` / `none`. The entry file and transitive
+  `reuse` imports are rendered in full. With `refs`, tables reached only through
+  `use` appear as compact external stubs containing referenced columns; `none`
+  hides them. Resolution and diagnostics always use the complete import graph.
 - D2 only: `--theme` (name or id, default `flagship`), `--animate` (default on). TableGroups render as containers and notes as tooltips.
 
 Helix (`~/.config/helix/languages.toml`):
@@ -48,7 +53,12 @@ args = ["lsp"]
 Opening a `.dbml` file in an LSP editor automatically opens a live browser
 preview that re-renders from the editor buffer as you type. Set
 `DBML_PREVIEW=off` to disable it, or `DBML_PREVIEW=manual` to serve the preview
-without auto-opening a browser.
+without auto-opening a browser. LSP previews default to referenced context;
+set `DBML_PREVIEW_CONTEXT=all|refs|none` to change it.
+
+DBML files should declare their own direct dependencies with `use`. Aggregating
+modules should re-export their owned files with `reuse`; imports in a parent
+module do not become dependencies of its children.
 
 > A Typst plugin lives under `typst/`, gated behind the `typst` build tag
 > (`make wasm`). It is experimental and not part of released builds.

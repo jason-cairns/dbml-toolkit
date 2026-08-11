@@ -68,6 +68,7 @@ func cmdRender(args []string) int {
 	animate := fs.Bool("animate", true, "animate relationship edges (D2)")
 	notes := fs.Bool("notes", false, "include inline notes (graphviz; D2 always uses tooltips)")
 	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
+	contextName := fs.String("context", "all", "import context: all|refs|none")
 	out := fs.String("o", "", "output file (default stdout)")
 	pos, ok := parseArgs(fs, args)
 	if !ok {
@@ -81,7 +82,12 @@ func cmdRender(args []string) int {
 	if !ok {
 		return 2
 	}
-	schema, diags, err := resolver.Load(pos[0])
+	contextMode, ok := resolver.ParseContext(*contextName)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "invalid --context %q (want all|refs|none)\n", *contextName)
+		return 2
+	}
+	schema, diags, err := resolver.LoadContext(pos[0], nil, contextMode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -107,6 +113,7 @@ func cmdPreview(args []string) int {
 	animate := fs.Bool("animate", true, "animate relationship edges (D2)")
 	notes := fs.Bool("notes", false, "include inline notes (graphviz; D2 always uses tooltips)")
 	noSchema := fs.Bool("no-schema", false, "hide schema names in table headers")
+	contextName := fs.String("context", "all", "import context: all|refs|none")
 	pos, ok := parseArgs(fs, args)
 	if !ok {
 		return 2
@@ -119,7 +126,12 @@ func cmdPreview(args []string) int {
 	if !ok {
 		return 2
 	}
-	if err := preview.Serve(pos[0], *port, !*noOpen, eng, opt); err != nil {
+	contextMode, ok := resolver.ParseContext(*contextName)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "invalid --context %q (want all|refs|none)\n", *contextName)
+		return 2
+	}
+	if err := preview.ServeContext(pos[0], *port, !*noOpen, eng, opt, contextMode); err != nil {
 		fmt.Fprintln(os.Stderr, "preview:", err)
 		return 1
 	}
@@ -129,6 +141,7 @@ func cmdPreview(args []string) int {
 func cmdParse(args []string) int {
 	fs := flag.NewFlagSet("parse", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "emit the resolved model as JSON")
+	contextName := fs.String("context", "all", "import context: all|refs|none")
 	pos, ok := parseArgs(fs, args)
 	if !ok {
 		return 2
@@ -137,7 +150,12 @@ func cmdParse(args []string) int {
 		fmt.Fprintln(os.Stderr, "parse: missing <entry.dbml>")
 		return 2
 	}
-	schema, diags, err := resolver.Load(pos[0])
+	contextMode, ok := resolver.ParseContext(*contextName)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "invalid --context %q (want all|refs|none)\n", *contextName)
+		return 2
+	}
+	schema, diags, err := resolver.LoadContext(pos[0], nil, contextMode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
