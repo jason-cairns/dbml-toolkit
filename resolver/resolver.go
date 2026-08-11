@@ -60,7 +60,7 @@ func Graph(entry string, overlay map[string]string) (*model.Schema, map[string]*
 			diags = append(diags, model.Diagnostic{Pos: d.Pos, End: d.End, Msg: d.Msg})
 		}
 		for _, imp := range f.Imports {
-			child := resolvePath(path, imp.Path)
+			child := ResolvePath(path, imp.Path)
 			if err := visit(child); err != nil {
 				diags = append(diags, model.Diagnostic{Pos: imp.Pos, End: imp.Pos,
 					Msg: "cannot import " + imp.Path + ": " + err.Error()})
@@ -90,9 +90,9 @@ func Graph(entry string, overlay map[string]string) (*model.Schema, map[string]*
 	return schema, files, diags, nil
 }
 
-// resolvePath resolves an import path relative to the importing file, adding
+// ResolvePath resolves an import path relative to the importing file, adding
 // the .dbml extension when omitted.
-func resolvePath(from, rel string) string {
+func ResolvePath(from, rel string) string {
 	if !strings.HasSuffix(rel, ".dbml") {
 		rel += ".dbml"
 	}

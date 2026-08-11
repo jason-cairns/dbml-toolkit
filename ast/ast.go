@@ -36,6 +36,8 @@ type Import struct {
 	Wildcard bool
 	Items    []ImportItem
 	Path     string
+	PathPos  token.Pos // position of the quoted import path
+	PathEnd  token.Pos // position just past the quoted import path
 	Pos      token.Pos
 }
 

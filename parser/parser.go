@@ -615,6 +615,8 @@ func (p *parser) parseImport() {
 	if p.isKw("from") {
 		p.next()
 	}
+	imp.PathPos = p.cur().Pos
+	imp.PathEnd = p.cur().End
 	imp.Path = p.stringValue()
 	p.file.Imports = append(p.file.Imports, imp)
 }

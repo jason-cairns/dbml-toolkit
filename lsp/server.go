@@ -517,6 +517,18 @@ func (s *Server) index(uri string) *index {
 		}
 	}
 	for p, f := range files {
+		for _, imp := range f.Imports {
+			child := resolver.ResolvePath(p, imp.Path)
+			if _, ok := files[child]; !ok || imp.PathEnd.Off <= imp.PathPos.Off {
+				continue
+			}
+			// An import path names a file, rather than a schema symbol. Give it a
+			// private target whose definition is the start of that imported file.
+			target := "import:" + child
+			ix.defs[target] = locFor(child, 1, 1, 0)
+			ix.occs = append(ix.occs, mkOcc(p, imp.PathPos.Line, imp.PathPos.Col,
+				imp.PathEnd.Off-imp.PathPos.Off, target))
+		}
 		for _, t := range f.Tables {
 			qt := key(qual(t.Schema, t.Name))
 			ix.occs = append(ix.occs, mkOcc(p, t.NamePos.Line, t.NamePos.Col, len(t.Name), qt))

@@ -61,6 +61,41 @@ func TestCrossFileNavigation(t *testing.T) {
 	}
 }
 
+func TestGoToDefinitionOnWildcardImportPath(t *testing.T) {
+	dir := t.TempDir()
+	views := filepath.Join(dir, "_views")
+	if err := os.Mkdir(views, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	medallion := filepath.Join(views, "medallion.dbml")
+	main := filepath.Join(dir, "main.dbml")
+	if err := os.WriteFile(medallion, []byte("Table medals {\n  id int [pk]\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainSrc := "use * from './_views/medallion'\n"
+	if err := os.WriteFile(main, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{docs: map[string]string{main: mainSrc, medallion: readFile(t, medallion)}}
+	idx := s.index(pathToURI(main))
+	pathStart := strings.Index(mainSrc, "'./_views/medallion'")
+	occ := idx.at(main, position{Line: 0, Char: pathStart + 4})
+	if occ == nil {
+		t.Fatal("no occurrence found on wildcard import path")
+	}
+	def, ok := idx.defs[occ.target]
+	if !ok {
+		t.Fatalf("no definition for import target %q", occ.target)
+	}
+	if got := uriToPath(def.URI); got != medallion {
+		t.Fatalf("definition should open imported file %s, got %s", medallion, got)
+	}
+	if def.Range.Start != (position{}) {
+		t.Fatalf("definition should point to imported file start, got %+v", def.Range.Start)
+	}
+}
+
 // A single unparseable frame must not kill the connection: its bytes are fully
 // consumed so the stream stays aligned, and read must return the next valid
 // message. Dying here would strand the editor's diagnostics.
