@@ -6,19 +6,69 @@ import (
 	"github.com/jason-cairns/dbml-toolkit/ast"
 )
 
+// Exports is the set of resolved symbols a module re-exports. It is symbol- and
+// not file-granular, so a selective `reuse { table ... }` can export part of a
+// file while leaving the rest of it out of the view.
+type Exports struct {
+	Projects map[*ast.Project]bool
+	Tables   map[*Table]bool
+	Enums    map[*ast.Enum]bool
+	Groups   map[*ast.TableGroup]bool
+	Notes    map[*ast.Note]bool
+}
+
+// NewExports returns an empty export set ready to be populated.
+func NewExports() *Exports {
+	return &Exports{
+		Projects: map[*ast.Project]bool{},
+		Tables:   map[*Table]bool{},
+		Enums:    map[*ast.Enum]bool{},
+		Groups:   map[*ast.TableGroup]bool{},
+		Notes:    map[*ast.Note]bool{},
+	}
+}
+
+// AddFile exports every declaration of one parsed file, as a wildcard `reuse *`
+// does. Tables are matched to their resolved counterparts by qualified name.
+func (e *Exports) AddFile(s *Schema, f *ast.File) {
+	if f == nil {
+		return
+	}
+	for _, project := range f.Projects {
+		e.Projects[project] = true
+	}
+	for _, enum := range f.Enums {
+		e.Enums[enum] = true
+	}
+	for _, group := range f.Groups {
+		e.Groups[group] = true
+	}
+	for _, note := range f.Notes {
+		e.Notes[note] = true
+	}
+	for _, table := range f.Tables {
+		if t := s.Lookup(ast.QualifiedName(table.Schema, table.Name)); t != nil {
+			e.Tables[t] = true
+		}
+	}
+}
+
 // ModuleView returns the portion of a resolved schema exported by entry and
 // its transitive `reuse` imports. When referencedContext is true, tables
-// reached only through `use` are retained as compact stubs when an exported
-// table has a relationship to them.
-func ModuleView(s *Schema, exportedFiles map[string]bool, referencedContext bool) *Schema {
+// reached only through `use` — or left out by a selective `reuse` — are
+// retained as compact stubs when an exported table has a relationship to them.
+func ModuleView(s *Schema, exports *Exports, referencedContext bool) *Schema {
 	if s == nil {
 		return nil
+	}
+	if exports == nil {
+		exports = NewExports()
 	}
 
 	exported := map[*Table]bool{}
 	selected := map[*Table]bool{}
 	for _, table := range s.Tables {
-		if exportedFiles[table.NamePos.File] {
+		if exports.Tables[table] {
 			exported[table] = true
 			selected[table] = true
 		}
@@ -52,16 +102,16 @@ func ModuleView(s *Schema, exportedFiles map[string]bool, referencedContext bool
 	}
 
 	view := &Schema{byKey: map[string]*Table{}}
-	if s.Project != nil && exportedFiles[s.Project.Pos.File] {
+	if s.Project != nil && exports.Projects[s.Project] {
 		view.Project = s.Project
 	}
 	for _, enum := range s.Enums {
-		if exportedFiles[enum.Pos.File] {
+		if exports.Enums[enum] {
 			view.Enums = append(view.Enums, enum)
 		}
 	}
 	for _, note := range s.Notes {
-		if exportedFiles[note.Pos.File] {
+		if exports.Notes[note] {
 			view.Notes = append(view.Notes, note)
 		}
 	}
@@ -87,13 +137,13 @@ func ModuleView(s *Schema, exportedFiles map[string]bool, referencedContext bool
 		view.Refs = append(view.Refs, &copy)
 	}
 	for _, group := range s.Groups {
-		if !exportedFiles[group.Pos.File] {
+		if !exports.Groups[group] {
 			continue
 		}
 		copy := *group
 		copy.Members = nil
 		for _, member := range group.Members {
-			if table := s.Lookup(groupMemberName(member)); table != nil && selected[table] {
+			if table := s.Lookup(GroupMemberName(member)); table != nil && selected[table] {
 				copy.Members = append(copy.Members, member)
 			}
 		}
@@ -120,7 +170,9 @@ func externalStub(table *Table, referenced map[string]bool) *Table {
 	return &stub
 }
 
-func groupMemberName(member ast.GroupMember) string {
+// GroupMemberName renders a table-group member as the name a schema lookup
+// expects: qualified when the member carries a schema, bare otherwise.
+func GroupMemberName(member ast.GroupMember) string {
 	if member.Schema == "" {
 		return member.Table
 	}

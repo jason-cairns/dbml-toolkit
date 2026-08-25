@@ -32,7 +32,11 @@ func TestModuleViewKeepsExportedTablesAndCompactReferencedContext(t *testing.T) 
 		Members: []ast.GroupMember{{Table: "posts"}, {Table: "users"}},
 	}}
 
-	view := ModuleView(schema, map[string]bool{ownedFile: true}, true)
+	exports := NewExports()
+	exports.Tables[owned] = true
+	exports.Groups[schema.Groups[0]] = true
+
+	view := ModuleView(schema, exports, true)
 	if len(view.Tables) != 2 || len(view.Refs) != 1 {
 		t.Fatalf("referenced view = %d tables, %d refs; want 2, 1", len(view.Tables), len(view.Refs))
 	}
@@ -50,7 +54,7 @@ func TestModuleViewKeepsExportedTablesAndCompactReferencedContext(t *testing.T) 
 		t.Fatalf("group members = %#v", view.Groups)
 	}
 
-	withoutContext := ModuleView(schema, map[string]bool{ownedFile: true}, false)
+	withoutContext := ModuleView(schema, exports, false)
 	if len(withoutContext.Tables) != 1 || withoutContext.Tables[0] != owned || len(withoutContext.Refs) != 0 {
 		t.Fatalf("no-context view = %#v", withoutContext)
 	}
