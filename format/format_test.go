@@ -128,3 +128,21 @@ func TestFormatRoundTripsQualifiedImportItems(t *testing.T) {
 		t.Errorf("qualified import formatting not idempotent\n--- got ---\n%s\n--- again ---\n%s", got, again)
 	}
 }
+
+func TestFormatKeepsEmptySelectionDistinctFromBareReuse(t *testing.T) {
+	// An empty selection selects nothing while a braceless `reuse from`
+	// re-exports the child whole, so the braces have to survive formatting.
+	for in, want := range map[string]string{
+		"reuse {\n} from \"./child\"\n": "reuse { } from './child'\n",
+		"reuse from \"./child\"\n":      "reuse from './child'\n",
+		"use { } from \"./child\"\n":    "use { } from './child'\n",
+	} {
+		got := fmtOK(t, in)
+		if got != want {
+			t.Errorf("format(%q) = %q, want %q", in, got, want)
+		}
+		if again := fmtOK(t, got); again != got {
+			t.Errorf("format(%q) is not idempotent: %q then %q", in, got, again)
+		}
+	}
+}

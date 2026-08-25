@@ -597,6 +597,7 @@ func (p *parser) parseImport() {
 		imp.Wildcard = true
 	} else if p.cur().Kind == token.LBrace {
 		p.next()
+		imp.Selective = true
 		for p.cur().Kind != token.RBrace && p.cur().Kind != token.EOF {
 			since := p.cur()
 			it := ast.ImportItem{}

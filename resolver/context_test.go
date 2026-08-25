@@ -203,3 +203,72 @@ Table outsider {
 		t.Fatalf("selective reuse should only see the child module: %#v", view.Tables)
 	}
 }
+
+func TestLoadContextEmptySelectiveReuseSelectsNothing(t *testing.T) {
+	dir := t.TempDir()
+	writeContextFile(t, dir, "child.dbml", "Table a {\n  id int [pk]\n}\n")
+	empty := writeContextFile(t, dir, "empty.dbml", "reuse { } from './child'\n")
+	bare := writeContextFile(t, dir, "bare.dbml", "reuse from './child'\n")
+
+	view, diags, err := LoadContext(empty, nil, ContextNone)
+	if err != nil || len(diags) != 0 {
+		t.Fatalf("empty selection: err=%v diags=%v", err, diags)
+	}
+	if len(view.Tables) != 0 {
+		t.Fatalf("an empty `reuse { }` selects nothing, got %#v", view.Tables)
+	}
+
+	// A braceless `reuse from` is not a selection at all, and keeps re-exporting
+	// the child module whole.
+	view, diags, err = LoadContext(bare, nil, ContextNone)
+	if err != nil || len(diags) != 0 {
+		t.Fatalf("braceless reuse: err=%v diags=%v", err, diags)
+	}
+	if len(view.Tables) != 1 || view.Tables[0].Name != "a" {
+		t.Fatalf("braceless reuse = %#v", view.Tables)
+	}
+}
+
+func TestLoadContextSelectiveReuseIgnoresAliasesFromOtherModules(t *testing.T) {
+	dir := t.TempDir()
+	writeContextFile(t, dir, "child.dbml", "Table a {\n  id int [pk]\n}\n")
+	writeContextFile(t, dir, "sibling.dbml", "use { table a as leaked } from './child'\n")
+	entry := writeContextFile(t, dir, "index.dbml",
+		"use * from './sibling'\nreuse { table leaked } from './child'\n")
+
+	view, diags, err := LoadContext(entry, nil, ContextNone)
+	if err != nil || len(diags) != 0 {
+		t.Fatalf("no context: err=%v diags=%v", err, diags)
+	}
+	if len(view.Tables) != 0 {
+		t.Fatalf("an alias coined by a sibling is not a name child answers to: %#v", view.Tables)
+	}
+}
+
+func TestLoadContextSelectiveReuseFollowsTableGroupAliases(t *testing.T) {
+	dir := t.TempDir()
+	writeContextFile(t, dir, "child.dbml", `
+Table a {
+  id int [pk]
+}
+Table b {
+  id int [pk]
+}
+TableGroup gold {
+  a
+}
+`)
+	writeContextFile(t, dir, "mid.dbml", "reuse { tablegroup gold as g } from './child'\n")
+	entry := writeContextFile(t, dir, "top.dbml", "reuse { tablegroup g } from './mid'\n")
+
+	view, diags, err := LoadContext(entry, nil, ContextNone)
+	if err != nil || len(diags) != 0 {
+		t.Fatalf("no context: err=%v diags=%v", err, diags)
+	}
+	if len(view.Groups) != 1 || view.Groups[0].Name != "gold" {
+		t.Fatalf("aliased group = %#v", view.Groups)
+	}
+	if len(view.Tables) != 1 || view.Tables[0].Name != "a" {
+		t.Fatalf("aliased group members = %#v", view.Tables)
+	}
+}

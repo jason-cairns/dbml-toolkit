@@ -357,6 +357,10 @@ func (e *emitter) imp(im *ast.Import) {
 	switch {
 	case im.Wildcard:
 		line += " *"
+	case im.Selective && len(im.Items) == 0:
+		// An empty selection selects nothing, which is not what a braceless
+		// `reuse from` means, so the braces have to survive formatting.
+		line += " { }"
 	case len(im.Items) > 0:
 		parts := make([]string, len(im.Items))
 		for i, it := range im.Items {

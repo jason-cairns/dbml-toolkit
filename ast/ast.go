@@ -32,13 +32,14 @@ type Setting struct {
 
 // Import represents a `use`/`reuse ... from './path'` statement.
 type Import struct {
-	Reuse    bool // reuse (re-export) vs use (local only)
-	Wildcard bool
-	Items    []ImportItem
-	Path     string
-	PathPos  token.Pos // position of the quoted import path
-	PathEnd  token.Pos // position just past the quoted import path
-	Pos      token.Pos
+	Reuse     bool // reuse (re-export) vs use (local only)
+	Wildcard  bool
+	Selective bool // a `{ ... }` list was given, even if it turned out empty
+	Items     []ImportItem
+	Path      string
+	PathPos   token.Pos // position of the quoted import path
+	PathEnd   token.Pos // position just past the quoted import path
+	Pos       token.Pos
 }
 
 // ImportItem is one selectively-imported symbol, e.g. `table users as u`.

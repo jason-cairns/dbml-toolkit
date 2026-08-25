@@ -49,16 +49,16 @@ func LoadContext(entry string, overlay map[string]string, context Context) (*mod
 // plus what its `reuse` imports bring forward — the whole child module for
 // `reuse *`, or just the named symbols for a selective `reuse { ... }`.
 func Exports(entry string, files map[string]*ast.File, schema *model.Schema) *model.Exports {
-	b := &exporter{files: files, schema: schema, reach: map[string]map[string]bool{}}
+	b := &exporter{files: files, schema: schema, modules: map[string]*module{}}
 	out := model.NewExports()
 	b.collect(entry, out, map[string]bool{})
 	return out
 }
 
 type exporter struct {
-	files  map[string]*ast.File
-	schema *model.Schema
-	reach  map[string]map[string]bool // module path -> files reachable from it
+	files   map[string]*ast.File
+	schema  *model.Schema
+	modules map[string]*module
 }
 
 // collect adds everything path exports to out, following `reuse` imports.
@@ -77,8 +77,9 @@ func (b *exporter) collect(path string, out *model.Exports, seen map[string]bool
 			continue
 		}
 		child := ResolvePath(path, imp.Path)
-		if len(imp.Items) == 0 {
-			// `reuse *` (or a bare `reuse from`) re-exports the child whole.
+		if !imp.Selective {
+			// `reuse *`, or a braceless `reuse from`, re-exports the child
+			// whole. An empty `reuse { }` is selective and selects nothing.
 			b.collect(child, out, seen)
 			continue
 		}
@@ -88,55 +89,38 @@ func (b *exporter) collect(path string, out *model.Exports, seen map[string]bool
 	}
 }
 
-// selectItem exports one symbol named by a selective `reuse { ... }`. The
-// symbol must be declared somewhere in the child module's own import graph, so
-// a selective import cannot pull in an unrelated sibling of the entry file.
+// selectItem exports one symbol named by a selective `reuse { ... }`, resolving
+// the name against the child module's own namespace.
 func (b *exporter) selectItem(child string, item ast.ImportItem, out *model.Exports) {
-	reach := b.reachable(child)
+	m := b.module(child)
 	switch strings.ToLower(item.Type) {
 	case "table":
-		if t := b.lookupTable(item.Name, reach); t != nil {
+		if t := m.tables[item.Name]; t != nil {
 			out.Tables[t] = true
 		}
 	case "tablegroup":
-		for path := range reach {
-			for _, group := range b.files[path].Groups {
-				if !strings.EqualFold(group.Name, item.Name) {
-					continue
-				}
-				out.Groups[group] = true
-				for _, member := range group.Members {
-					if t := b.lookupTable(model.GroupMemberName(member), reach); t != nil {
-						out.Tables[t] = true
-					}
-				}
+		group := m.groups[item.Name]
+		if group == nil {
+			return
+		}
+		out.Groups[group] = true
+		for _, member := range group.Members {
+			if t := m.tables[model.GroupMemberName(member)]; t != nil {
+				out.Tables[t] = true
 			}
 		}
 	case "enum":
-		for path := range reach {
-			for _, enum := range b.files[path].Enums {
-				if namesSymbol(item.Name, enum.Schema, enum.Name) {
-					out.Enums[enum] = true
-				}
-			}
+		if enum := m.enums[item.Name]; enum != nil {
+			out.Enums[enum] = true
 		}
 	case "note":
-		for path := range reach {
-			for _, note := range b.files[path].Notes {
-				if strings.EqualFold(note.Name, item.Name) {
-					out.Notes[note] = true
-				}
-			}
+		if note := m.notes[item.Name]; note != nil {
+			out.Notes[note] = true
 		}
 	case "schema":
-		for path := range reach {
-			for _, table := range b.files[path].Tables {
-				if !strings.EqualFold(schemaOf(table.Schema), schemaOf(item.Name)) {
-					continue
-				}
-				if t := b.lookupTable(ast.QualifiedName(table.Schema, table.Name), reach); t != nil {
-					out.Tables[t] = true
-				}
+		for _, t := range m.tables {
+			if strings.EqualFold(schemaOf(t.Schema), schemaOf(item.Name)) {
+				out.Tables[t] = true
 			}
 		}
 	}
@@ -144,47 +128,138 @@ func (b *exporter) selectItem(child string, item ast.ImportItem, out *model.Expo
 	// tables that inject them before a view is ever taken.
 }
 
-// lookupTable resolves an imported table name — qualified, bare, table alias or
-// import alias — and keeps it only when it is declared inside the child module.
-func (b *exporter) lookupTable(name string, reach map[string]bool) *model.Table {
-	t := b.schema.Lookup(name)
-	if t == nil || !reach[t.NamePos.File] {
-		return nil
-	}
-	return t
+// module is one module's namespace: every file it can reach, and the names it
+// offers for each kind of symbol. Names come from the declarations in those
+// files plus the aliases their own import statements introduce, so an alias
+// coined by an unrelated sibling is not a name this module answers to.
+type module struct {
+	files  map[string]bool
+	tables map[string]*model.Table
+	groups map[string]*ast.TableGroup
+	enums  map[string]*ast.Enum
+	notes  map[string]*ast.Note
 }
 
-// reachable returns every file the given module can see, following both `use`
-// and `reuse`, since a selective import may name a symbol the child itself only
-// uses for context.
-func (b *exporter) reachable(path string) map[string]bool {
-	if cached, ok := b.reach[path]; ok {
+// module builds (and caches) the namespace rooted at path. Reachability follows
+// both `use` and `reuse`, since a selective import may name a symbol the child
+// itself only pulls in for context.
+func (b *exporter) module(path string) *module {
+	if cached, ok := b.modules[path]; ok {
 		return cached
 	}
-	out := map[string]bool{}
-	b.reach[path] = out
+	m := &module{
+		files:  map[string]bool{},
+		tables: map[string]*model.Table{},
+		groups: map[string]*ast.TableGroup{},
+		enums:  map[string]*ast.Enum{},
+		notes:  map[string]*ast.Note{},
+	}
+	b.modules[path] = m
+
 	var visit func(string)
 	visit = func(p string) {
-		if out[p] {
+		if m.files[p] {
 			return
 		}
-		file := b.files[p]
-		if file == nil {
+		if b.files[p] == nil {
 			return
 		}
-		out[p] = true
-		for _, imp := range file.Imports {
+		m.files[p] = true
+		for _, imp := range b.files[p].Imports {
 			visit(ResolvePath(p, imp.Path))
 		}
 	}
 	visit(path)
-	return out
+
+	for p := range m.files {
+		file := b.files[p]
+		for _, at := range file.Tables {
+			t := b.schema.Lookup(ast.QualifiedName(at.Schema, at.Name))
+			if t == nil || !m.files[t.NamePos.File] {
+				continue
+			}
+			m.tables[t.Qualified()] = t
+			if at.Schema == "" {
+				m.tables[at.Name] = t
+			}
+			if at.Alias != "" {
+				m.tables[at.Alias] = t
+			}
+		}
+		for _, group := range file.Groups {
+			m.groups[group.Name] = group
+		}
+		for _, enum := range file.Enums {
+			m.enums[ast.QualifiedName(enum.Schema, enum.Name)] = enum
+			if enum.Schema == "" {
+				m.enums[enum.Name] = enum
+			}
+		}
+		for _, note := range file.Notes {
+			m.notes[note.Name] = note
+		}
+	}
+	m.bindAliases(b)
+	return m
 }
 
-// namesSymbol reports whether an import item names a declaration, accepting
-// either the bare or the schema-qualified spelling.
-func namesSymbol(want, schema, name string) bool {
-	return strings.EqualFold(want, name) || strings.EqualFold(want, ast.QualifiedName(schema, name))
+// bindAliases adds the names the module's own import statements coin, so a
+// group re-exported as `tablegroup gold as g` answers to `g` further up.
+func (m *module) bindAliases(b *exporter) {
+	type binding struct{ kind, alias, target string }
+	var pending []binding
+	for p := range m.files {
+		for _, imp := range b.files[p].Imports {
+			for _, item := range imp.Items {
+				if item.Alias != "" {
+					pending = append(pending, binding{strings.ToLower(item.Type), item.Alias, item.Name})
+				}
+			}
+		}
+	}
+	// Aliases chain (`a as b` in one file, `b as c` in another) and the files
+	// come out of a map in no particular order, so keep binding what resolves
+	// until a whole pass adds nothing. Each pass drops what it bound, so this
+	// always terminates.
+	for progress := true; progress; {
+		progress = false
+		rest := pending[:0]
+		for _, bind := range pending {
+			if m.bind(bind.kind, bind.alias, bind.target) {
+				progress = true
+				continue
+			}
+			rest = append(rest, bind)
+		}
+		pending = rest
+	}
+}
+
+// bind names an already-known symbol, reporting whether the target resolved.
+func (m *module) bind(kind, alias, target string) bool {
+	switch kind {
+	case "table":
+		if t := m.tables[target]; t != nil {
+			m.tables[alias] = t
+			return true
+		}
+	case "tablegroup":
+		if group := m.groups[target]; group != nil {
+			m.groups[alias] = group
+			return true
+		}
+	case "enum":
+		if enum := m.enums[target]; enum != nil {
+			m.enums[alias] = enum
+			return true
+		}
+	case "note":
+		if note := m.notes[target]; note != nil {
+			m.notes[alias] = note
+			return true
+		}
+	}
+	return false
 }
 
 // schemaOf normalises a schema name, so an omitted schema compares equal to an
