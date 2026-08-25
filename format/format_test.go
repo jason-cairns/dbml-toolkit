@@ -115,3 +115,16 @@ func TestFormatRejectsSyntaxError(t *testing.T) {
 		t.Errorf("broken file should format to empty, got %q", out)
 	}
 }
+
+func TestFormatRoundTripsQualifiedImportItems(t *testing.T) {
+	in := "reuse {\n  table \"shared.dim_date\"\n  table \"shared.dim vehicle\" as dv\n  tablegroup gold\n} from \"./index\"\n"
+	want := "reuse { table \"shared.dim_date\", table \"shared.dim vehicle\" as dv, tablegroup gold } from './index'\n"
+	got := fmtOK(t, in)
+	if got != want {
+		t.Errorf("qualified import mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	// The formatted output reparses cleanly and formatting it again is stable.
+	if again := fmtOK(t, got); again != got {
+		t.Errorf("qualified import formatting not idempotent\n--- got ---\n%s\n--- again ---\n%s", got, again)
+	}
+}

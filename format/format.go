@@ -360,9 +360,11 @@ func (e *emitter) imp(im *ast.Import) {
 	case len(im.Items) > 0:
 		parts := make([]string, len(im.Items))
 		for i, it := range im.Items {
-			s := it.Type + " " + it.Name
+			// The name is one lexical token, so a schema-qualified name such as
+			// shared.dim_date has to be quoted whole to reparse as one item.
+			s := it.Type + " " + renderName(it.Name)
 			if it.Alias != "" {
-				s += " as " + it.Alias
+				s += " as " + renderName(it.Alias)
 			}
 			parts[i] = s
 		}
